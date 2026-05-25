@@ -1,0 +1,6 @@
+[tools]
+node = "latest"
+rust = "latest"
+bun = "latest"
+uv = "latest"
+python = "3.12"
