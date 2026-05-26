@@ -4,6 +4,7 @@ use crate::metrics::ccip::{
     ccip_merge as core_ccip_merge, ccip_same as core_ccip_same,
 };
 use crate::tagging::pixai::get_pixai_tags as core_get_pixai_tags;
+use image::DynamicImage;
 use napi_derive::napi;
 use std::collections::HashMap;
 
@@ -28,8 +29,12 @@ pub fn get_pixai_tags(
     thresholds: Option<HashMap<String, f64>>,
 ) -> napi::Result<PixaiTagResult> {
     // 1. パスから画像を開く (Rust側で透過PNG白ブレンド含む前処理が自動適用されます)
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image at {}: {}", path, e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image at {}: {}", path, e),
+        )
+    })?;
 
     let model = model_name.as_deref().unwrap_or("v0.9");
 
@@ -40,12 +45,24 @@ pub fn get_pixai_tags(
     });
 
     // 2. コア予測の実行
-    let result = core_get_pixai_tags(&image, model, core_thresholds)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("PixAI tagger prediction failed: {}", e)))?;
+    let result = core_get_pixai_tags(&image, model, core_thresholds).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("PixAI tagger prediction failed: {}", e),
+        )
+    })?;
 
     // 3. f32 -> f64 に変換して返す
-    let general = result.general.into_iter().map(|(k, v)| (k, v as f64)).collect();
-    let character = result.character.into_iter().map(|(k, v)| (k, v as f64)).collect();
+    let general = result
+        .general
+        .into_iter()
+        .map(|(k, v)| (k, v as f64))
+        .collect();
+    let character = result
+        .character
+        .into_iter()
+        .map(|(k, v)| (k, v as f64))
+        .collect();
 
     Ok(PixaiTagResult { general, character })
 }
@@ -55,18 +72,23 @@ pub fn get_pixai_tags(
 /// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
 /// * `model_name`: CCIPモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
 #[napi]
-pub fn ccip_get_embedding(
-    path: String,
-    model_name: Option<String>,
-) -> napi::Result<Vec<f64>> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image at {}: {}", path, e)))?;
+pub fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Result<Vec<f64>> {
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image at {}: {}", path, e),
+        )
+    })?;
 
     let model = model_name.as_deref().unwrap_or("");
 
     // CCIP の入力解像度はデフォルト 384
-    let embedding = core_ccip_extract_feature(&image, 384, model)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP embedding extraction failed: {}", e)))?;
+    let embedding = core_ccip_extract_feature(&image, 384, model).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("CCIP embedding extraction failed: {}", e),
+        )
+    })?;
 
     Ok(embedding.into_iter().map(|v| v as f64).collect())
 }
@@ -86,7 +108,11 @@ pub fn ccip_distance(
     if emb1.len() != 768 || emb2.len() != 768 {
         return Err(napi::Error::new(
             napi::Status::InvalidArg,
-            format!("Both embeddings must be exactly 768 dimensions. Got {} and {}.", emb1.len(), emb2.len()),
+            format!(
+                "Both embeddings must be exactly 768 dimensions. Got {} and {}.",
+                emb1.len(),
+                emb2.len()
+            ),
         ));
     }
 
@@ -94,8 +120,12 @@ pub fn ccip_distance(
     let e1: Vec<f32> = emb1.into_iter().map(|v| v as f32).collect();
     let e2: Vec<f32> = emb2.into_iter().map(|v| v as f32).collect();
 
-    let dist = core_ccip_difference(&e1, &e2, model)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP distance calculation failed: {}", e)))?;
+    let dist = core_ccip_difference(&e1, &e2, model).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("CCIP distance calculation failed: {}", e),
+        )
+    })?;
 
     Ok(dist as f64)
 }
@@ -116,7 +146,11 @@ pub fn ccip_same(
     if emb1.len() != 768 || emb2.len() != 768 {
         return Err(napi::Error::new(
             napi::Status::InvalidArg,
-            format!("Both embeddings must be exactly 768 dimensions. Got {} and {}.", emb1.len(), emb2.len()),
+            format!(
+                "Both embeddings must be exactly 768 dimensions. Got {} and {}.",
+                emb1.len(),
+                emb2.len()
+            ),
         ));
     }
 
@@ -125,8 +159,12 @@ pub fn ccip_same(
     let e2: Vec<f32> = emb2.into_iter().map(|v| v as f32).collect();
     let th = threshold.map(|v| v as f32);
 
-    let is_same = core_ccip_same(&e1, &e2, th, model)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP same check failed: {}", e)))?;
+    let is_same = core_ccip_same(&e1, &e2, th, model).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("CCIP same check failed: {}", e),
+        )
+    })?;
 
     Ok(is_same)
 }
@@ -146,7 +184,11 @@ pub fn ccip_batch_same(
         if emb.len() != 768 {
             return Err(napi::Error::new(
                 napi::Status::InvalidArg,
-                format!("Embedding at index {} must be exactly 768 dimensions. Got {}.", i, emb.len()),
+                format!(
+                    "Embedding at index {} must be exactly 768 dimensions. Got {}.",
+                    i,
+                    emb.len()
+                ),
             ));
         }
     }
@@ -158,8 +200,12 @@ pub fn ccip_batch_same(
         .collect();
     let th = threshold.map(|v| v as f32);
 
-    let matrix = core_ccip_batch_same(&core_embs, th, model)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP batch same check failed: {}", e)))?;
+    let matrix = core_ccip_batch_same(&core_embs, th, model).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("CCIP batch same check failed: {}", e),
+        )
+    })?;
 
     // ndarray::Array2<bool> -> Vec<Vec<bool>> の変換
     let mut result = Vec::with_capacity(matrix.nrows());
@@ -174,9 +220,7 @@ pub fn ccip_batch_same(
 ///
 /// * `embeddings`: マージする複数の768次元特徴ベクトルの配列
 #[napi]
-pub fn ccip_merge(
-    embeddings: Vec<Vec<f64>>,
-) -> napi::Result<Vec<f64>> {
+pub fn ccip_merge(embeddings: Vec<Vec<f64>>) -> napi::Result<Vec<f64>> {
     if embeddings.is_empty() {
         return Err(napi::Error::new(
             napi::Status::InvalidArg,
@@ -187,7 +231,11 @@ pub fn ccip_merge(
         if emb.len() != 768 {
             return Err(napi::Error::new(
                 napi::Status::InvalidArg,
-                format!("Embedding at index {} must be exactly 768 dimensions. Got {}.", i, emb.len()),
+                format!(
+                    "Embedding at index {} must be exactly 768 dimensions. Got {}.",
+                    i,
+                    emb.len()
+                ),
             ));
         }
     }
@@ -197,8 +245,12 @@ pub fn ccip_merge(
         .map(|emb| emb.into_iter().map(|v| v as f32).collect())
         .collect();
 
-    let merged = core_ccip_merge(&core_embs)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP merge failed: {}", e)))?;
+    let merged = core_ccip_merge(&core_embs).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("CCIP merge failed: {}", e),
+        )
+    })?;
 
     Ok(merged.into_iter().map(|v| v as f64).collect())
 }
@@ -225,7 +277,11 @@ pub fn ccip_cluster(
         if emb.len() != 768 {
             return Err(napi::Error::new(
                 napi::Status::InvalidArg,
-                format!("Embedding at index {} must be exactly 768 dimensions. Got {}.", i, emb.len()),
+                format!(
+                    "Embedding at index {} must be exactly 768 dimensions. Got {}.",
+                    i,
+                    emb.len()
+                ),
             ));
         }
     }
@@ -240,9 +296,189 @@ pub fn ccip_cluster(
 
     // method は dbscan
     let clusters = core_ccip_clustering(&core_embs, "dbscan", core_eps, core_min_samples, model)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("CCIP clustering failed: {}", e)))?;
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("CCIP clustering failed: {}", e),
+            )
+        })?;
 
     Ok(clusters.into_iter().map(|v| v as i32).collect())
+}
+
+/// 指定したローカル画像ファイルを読み込み、RGBA 画像の場合は白背景をブレンドして RGB 画像として返します。
+/// 戻り値は RGBA (R, G, B, A) のピクセル配列です。
+///
+/// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
+/// * `force_background`: 背景色の RGB 値（例: `[255, 255, 255]`）。省略時は白背景。
+#[napi]
+pub fn load_image_from_file(
+    path: String,
+    force_background: Option<Vec<f64>>,
+) -> napi::Result<Vec<u8>> {
+    let img = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {e}"),
+        )
+    })?;
+
+    let bg = force_background.map(|v| {
+        if v.len() != 3 {
+            [255, 255, 255]
+        } else {
+            [v[0] as u8, v[1] as u8, v[2] as u8]
+        }
+    });
+
+    let img = if let Some(bg) = bg {
+        if img.color().has_alpha() {
+            crate::image::force_image_background(&img, bg)
+        } else {
+            img
+        }
+    } else {
+        img
+    };
+
+    let rgba = img.to_rgba8();
+    Ok(rgba.into_raw())
+}
+
+/// 指定した URL から画像をダウンロードして読み込みます。
+#[napi]
+pub fn load_image_from_url(url: String) -> napi::Result<Vec<u8>> {
+    use crate::image::load::{ImageSource, load_image};
+    let img = load_image(&ImageSource::HttpUrl(&url)).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to load from URL: {e}"),
+        )
+    })?;
+    let rgba = img.to_rgba8();
+    Ok(rgba.into_raw())
+}
+
+/// RGB エンコード: 画像をテンソル（CHW 順序、float32）に変換します。
+/// 戻り値はフラットな f64 配列です（形状は [C, H, W]）。
+#[napi]
+pub fn rgb_encode(
+    path: String,
+    order: Option<String>,
+    use_float: Option<bool>,
+) -> napi::Result<Vec<f64>> {
+    let img = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {e}"),
+        )
+    })?;
+    let order = order.unwrap_or_else(|| "CHW".to_string());
+    let use_float = use_float.unwrap_or(true);
+
+    let encoded = crate::image::rgb_encode(&img, &order, use_float).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("RGB encode failed: {e}"),
+        )
+    })?;
+
+    Ok(encoded.iter().map(|&v| v as f64).collect())
+}
+
+/// RGB デコード: テンソル（CHW 順序、float32）を画像に変換し、ファイルに保存します。
+#[napi]
+pub fn rgb_decode(
+    tensor: Vec<f64>,
+    shape_c: u32,
+    shape_h: u32,
+    shape_w: u32,
+    order: Option<String>,
+    output_path: String,
+) -> napi::Result<()> {
+    let order = order.unwrap_or_else(|| "CHW".to_string());
+    let arr = ndarray::Array3::from_shape_vec(
+        (shape_c as usize, shape_h as usize, shape_w as usize),
+        tensor.into_iter().map(|v| v as f32).collect(),
+    )
+    .map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Invalid tensor shape: {e}"),
+        )
+    })?;
+
+    let img = crate::image::rgb_decode(&arr.view(), &order).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("RGB decode failed: {e}"),
+        )
+    })?;
+
+    img.save(&output_path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to save image: {e}"),
+        )
+    })?;
+
+    Ok(())
+}
+
+/// 複数の画像レイヤーを合成します。
+/// `layers` は画像パスの配列、`alphas` は各レイヤーの透明度の配列です。
+/// 戻り値は RGBA ピクセル配列です。
+#[napi]
+pub fn istack(
+    layers: Vec<String>,
+    alphas: Vec<f64>,
+    output_width: Option<u32>,
+    output_height: Option<u32>,
+) -> napi::Result<Vec<u8>> {
+    if layers.len() != alphas.len() {
+        return Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            "layers and alphas must have the same length".to_string(),
+        ));
+    }
+
+    let items: Vec<crate::image::LayerItemBuilder> = layers
+        .iter()
+        .zip(alphas.iter())
+        .map(|(path, alpha)| {
+            let img = image::open(path)
+                .unwrap_or_else(|_| DynamicImage::ImageRgba8(image::RgbaImage::new(1, 1)));
+            crate::image::LayerItemBuilder::from_image(img).with_alpha(*alpha as f32)
+        })
+        .collect();
+
+    let size = output_width.zip(output_height);
+
+    let result = crate::image::istack(items, size).map_err(|e| {
+        napi::Error::new(napi::Status::GenericFailure, format!("istack failed: {e}"))
+    })?;
+
+    Ok(result.into_raw())
+}
+
+/// ストレージディレクトリのパスを取得します。
+#[napi]
+pub fn get_storage_dir() -> String {
+    crate::utils::storage::get_storage_dir()
+        .to_string_lossy()
+        .to_string()
+}
+
+/// パッケージのバージョンを取得します。
+#[napi]
+pub fn get_version() -> String {
+    crate::config::VERSION.to_string()
+}
+
+/// パッケージのタイトルを取得します。
+#[napi]
+pub fn get_title() -> String {
+    crate::config::TITLE.to_string()
 }
 
 pub mod detect;

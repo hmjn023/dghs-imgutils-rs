@@ -16,4 +16,16 @@ pub enum ImageError {
     /// 引数や設定の異常エラー
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
+
+    /// I/O エラー
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// HTTP ダウンロードエラー
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    /// Base64 デコードエラー
+    #[error("Base64 decode error: {0}")]
+    Base64(String),
 }

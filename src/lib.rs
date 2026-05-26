@@ -33,6 +33,12 @@ pub mod validate;
 /// 画像操作（リサイズ・自動トリミング・自動検閲）機能。
 pub mod operate;
 
+/// パッケージメタ情報（バージョン、タイトルなど）。
+pub mod config;
+
+/// 汎用ユーティリティ（キャッシュ、ストレージ、エリアバッチラン）。
+pub mod utils;
+
 #[cfg(feature = "napi")]
 /// JS/TS ネイティブバインディング (napi-rs) 用の公開インターフェース。
 pub mod napi;
