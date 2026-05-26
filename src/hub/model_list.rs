@@ -421,4 +421,22 @@ pub static ALL_MODELS: &[ModelEntry] = &[
         "dw-ll_ucoco_384.onnx",
         "DWpose: RTMPose-x キーポイント推定モデル (384x288)",
     ),
+    // ==========================================
+    // ocr/  ─ PaddleOCR (DBNet 検出 + CRNN 認識)
+    // ==========================================
+    ModelEntry::model(
+        "deepghs/paddleocr",
+        "ch_PP-OCRv4_det/inference.onnx",
+        "OCR: Detection model (ch_PP-OCRv4 DBNet)",
+    ),
+    ModelEntry::model(
+        "deepghs/paddleocr",
+        "ch_PP-OCRv4_rec/inference.onnx",
+        "OCR: Recognition model (ch_PP-OCRv4 CRNN)",
+    ),
+    ModelEntry::model(
+        "deepghs/paddleocr",
+        "ch_PP-OCRv4_rec/ppocr_keys_v1.txt",
+        "OCR: Character dictionary",
+    ),
 ];

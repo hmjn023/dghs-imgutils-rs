@@ -30,6 +30,9 @@ pub mod edge;
 /// 姿勢推定（DWpose / OpenPose 18 キーポイント検出）機能。
 pub mod pose;
 
+/// OCR（テキスト検出・認識）機能。
+pub mod ocr;
+
 /// 画像検証（破損チェック・グレースケール・AI生成・NSFW 等）機能。
 pub mod validate;
 
