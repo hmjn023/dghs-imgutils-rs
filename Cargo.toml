@@ -3,6 +3,9 @@ name = "dghs-imgutils-rs"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 csv = "1.4.0"
 hf-hub = "0.5.0"
@@ -13,3 +16,12 @@ ort = "2.0.0-rc.12"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 thiserror = "2.0.18"
+napi = { version = "2.16.11", features = ["async", "serde-json", "napi4"], optional = true }
+napi-derive = { version = "2.16.9", optional = true }
+
+[build-dependencies]
+napi-build = "2.1.4"
+
+[features]
+default = ["napi"]
+napi = ["dep:napi", "dep:napi-derive"]
