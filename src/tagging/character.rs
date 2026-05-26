@@ -2,47 +2,156 @@ use crate::tagging::tag_match::{split_to_words, words_to_matcher};
 use std::collections::HashSet;
 
 const CHAR_WHITELIST_SUFFIX: &[&str] = &[
-    "anal_hair", "anal_tail", "arm_behind_head", "arm_hair",
-    "arm_under_breasts", "arms_behind_head", "bird_on_head",
-    "blood_in_hair", "breasts_on_glass", "breasts_on_head",
-    "cat_on_head", "closed_eyes", "clothed_female_nude_female",
-    "clothed_female_nude_male", "clothed_male_nude_female",
-    "clothes_between_breasts", "cream_on_face", "drying_hair",
-    "empty_eyes", "face_to_breasts", "facial", "food_on_face",
-    "food_on_head", "game_boy", "grabbing_another_s_hair",
-    "grabbing_own_breast", "gun_to_head", "half-closed_eyes",
-    "head_between_breasts", "heart_in_eye", "multiple_boys",
-    "multiple_girls", "object_on_breast", "object_on_head",
-    "paint_splatter_on_face", "parted_lips", "penis_on_face",
-    "person_on_head", "pokemon_on_head", "pubic_hair",
-    "rabbit_on_head", "rice_on_face", "severed_head",
-    "star_in_eye", "sticker_on_face", "tentacles_on_male",
+    "anal_hair",
+    "anal_tail",
+    "arm_behind_head",
+    "arm_hair",
+    "arm_under_breasts",
+    "arms_behind_head",
+    "bird_on_head",
+    "blood_in_hair",
+    "breasts_on_glass",
+    "breasts_on_head",
+    "cat_on_head",
+    "closed_eyes",
+    "clothed_female_nude_female",
+    "clothed_female_nude_male",
+    "clothed_male_nude_female",
+    "clothes_between_breasts",
+    "cream_on_face",
+    "drying_hair",
+    "empty_eyes",
+    "face_to_breasts",
+    "facial",
+    "food_on_face",
+    "food_on_head",
+    "game_boy",
+    "grabbing_another_s_hair",
+    "grabbing_own_breast",
+    "gun_to_head",
+    "half-closed_eyes",
+    "head_between_breasts",
+    "heart_in_eye",
+    "multiple_boys",
+    "multiple_girls",
+    "object_on_breast",
+    "object_on_head",
+    "paint_splatter_on_face",
+    "parted_lips",
+    "penis_on_face",
+    "person_on_head",
+    "pokemon_on_head",
+    "pubic_hair",
+    "rabbit_on_head",
+    "rice_on_face",
+    "severed_head",
+    "star_in_eye",
+    "sticker_on_face",
+    "tentacles_on_male",
     "tying_hair",
 ];
 
 const CHAR_WHITELIST_PREFIX: &[&str] = &[
-    "holding", "hand on", "hands on", "hand to", "hands to",
-    "hand in", "hands in", "hand over", "hands over",
-    "futa with", "futa on", "cum on", "covering", "adjusting", "rubbing",
-    "sitting", "shading", "playing", "cutting",
+    "holding",
+    "hand on",
+    "hands on",
+    "hand to",
+    "hands to",
+    "hand in",
+    "hands in",
+    "hand over",
+    "hands over",
+    "futa with",
+    "futa on",
+    "cum on",
+    "covering",
+    "adjusting",
+    "rubbing",
+    "sitting",
+    "shading",
+    "playing",
+    "cutting",
 ];
 
 const CHAR_WHITELIST_WORD: &[&str] = &["drill"];
 
 const CHAR_SUFFIXES: &[&str] = &[
-    "eyes", "skin", "hair", "bun", "bangs", "cut", "sidelocks",
-    "twintails", "braid", "braids", "afro", "ahoge", "drill",
-    "drills", "bald", "dreadlocks", "side up", "ponytail", "updo",
-    "beard", "mustache", "pointy ears", "ear", "horn", "tail", "wing",
-    "ornament", "hairband", "pupil", "bow", "eyewear", "headwear",
-    "ribbon", "crown", "cap", "hat", "hairclip", "breast", "mole",
-    "halo", "earrings", "animal ear fluff", "hair flower", "glasses",
-    "fang", "female", "girl", "boy", "male", "beret", "heterochromia",
-    "headdress", "headgear", "eyepatch", "headphones", "eyebrows", "eyelashes",
-    "sunglasses", "hair intakes", "scrunchie", "ear_piercing", "head",
-    "on face", "on head", "on hair", "headband", "hair rings", "under_mouth",
-    "freckles", "lip", "eyeliner", "eyeshadow", "tassel", "over one eye",
-    "drill", "drill hair",
+    "eyes",
+    "skin",
+    "hair",
+    "bun",
+    "bangs",
+    "cut",
+    "sidelocks",
+    "twintails",
+    "braid",
+    "braids",
+    "afro",
+    "ahoge",
+    "drill",
+    "drills",
+    "bald",
+    "dreadlocks",
+    "side up",
+    "ponytail",
+    "updo",
+    "beard",
+    "mustache",
+    "pointy ears",
+    "ear",
+    "horn",
+    "tail",
+    "wing",
+    "ornament",
+    "hairband",
+    "pupil",
+    "bow",
+    "eyewear",
+    "headwear",
+    "ribbon",
+    "crown",
+    "cap",
+    "hat",
+    "hairclip",
+    "breast",
+    "mole",
+    "halo",
+    "earrings",
+    "animal ear fluff",
+    "hair flower",
+    "glasses",
+    "fang",
+    "female",
+    "girl",
+    "boy",
+    "male",
+    "beret",
+    "heterochromia",
+    "headdress",
+    "headgear",
+    "eyepatch",
+    "headphones",
+    "eyebrows",
+    "eyelashes",
+    "sunglasses",
+    "hair intakes",
+    "scrunchie",
+    "ear_piercing",
+    "head",
+    "on face",
+    "on head",
+    "on hair",
+    "headband",
+    "hair rings",
+    "under_mouth",
+    "freckles",
+    "lip",
+    "eyeliner",
+    "eyeshadow",
+    "tassel",
+    "over one eye",
+    "drill",
+    "drill hair",
 ];
 
 const CHAR_PREFIXES: &[&str] = &["hair over", "hair between", "facial"];
@@ -53,7 +162,9 @@ struct WordPool {
 
 impl WordPool {
     fn new(words: &[&str]) -> Self {
-        let mut pool = Self { words: std::collections::HashMap::new() };
+        let mut pool = Self {
+            words: std::collections::HashMap::new(),
+        };
         for w in words {
             pool.append(w);
         }
@@ -83,7 +194,9 @@ struct SuffixPool {
 
 impl SuffixPool {
     fn new(suffixes: &[&str]) -> Self {
-        let mut pool = Self { suffixes: std::collections::HashMap::new() };
+        let mut pool = Self {
+            suffixes: std::collections::HashMap::new(),
+        };
         for s in suffixes {
             pool.append(s);
         }
@@ -121,7 +234,9 @@ struct PrefixPool {
 
 impl PrefixPool {
     fn new(prefixes: &[&str]) -> Self {
-        let mut pool = Self { prefixes: std::collections::HashMap::new() };
+        let mut pool = Self {
+            prefixes: std::collections::HashMap::new(),
+        };
         for p in prefixes {
             pool.append(p);
         }

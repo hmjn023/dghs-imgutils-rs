@@ -19,8 +19,18 @@ pub fn get_deepdanbooru_tags(
     character_threshold: f32,
     use_real_name: bool,
 ) -> Result<TagResult, TaggingError> {
-    let model_path = hf_hub_download("deepghs/imgutils-models", "deepdanbooru/deepdanbooru.onnx", None, None)?;
-    let tags_path = hf_hub_download("deepghs/imgutils-models", "deepdanbooru/deepdanbooru_tags.csv", None, None)?;
+    let model_path = hf_hub_download(
+        "deepghs/imgutils-models",
+        "deepdanbooru/deepdanbooru.onnx",
+        None,
+        None,
+    )?;
+    let tags_path = hf_hub_download(
+        "deepghs/imgutils-models",
+        "deepdanbooru/deepdanbooru_tags.csv",
+        None,
+        None,
+    )?;
 
     let rgb = force_image_background(image, [0, 0, 0]);
     let (w, h) = rgb.dimensions();
@@ -119,8 +129,6 @@ pub fn get_deepdanbooru_tags(
     })
 }
 
-pub fn get_deepdanbooru_tags_simple(
-    image: &DynamicImage,
-) -> Result<TagResult, TaggingError> {
+pub fn get_deepdanbooru_tags_simple(image: &DynamicImage) -> Result<TagResult, TaggingError> {
     get_deepdanbooru_tags(image, 0.5, 0.5, false)
 }

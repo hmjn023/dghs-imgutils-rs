@@ -18,7 +18,11 @@ fn test_tagging_benchmark() {
     for (idx, rel_path) in test_images.iter().enumerate() {
         let mut image_path = PathBuf::from(manifest_dir);
         image_path.push(rel_path);
-        assert!(image_path.exists(), "Test image not found: {:?}", image_path);
+        assert!(
+            image_path.exists(),
+            "Test image not found: {:?}",
+            image_path
+        );
 
         let image = image::open(&image_path).expect("Failed to open image");
 
@@ -29,8 +33,12 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::deepdanbooru::get_deepdanbooru_tags_simple(&image);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  DeepDanbooru: {:?} (general={}, character={})",
-                dur, r.general.len(), r.character.len()),
+            Ok(r) => println!(
+                "  DeepDanbooru: {:?} (general={}, character={})",
+                dur,
+                r.general.len(),
+                r.character.len()
+            ),
             Err(e) => println!("  DeepDanbooru: FAILED - {}", e),
         }
 
@@ -39,8 +47,7 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::mldanbooru::get_mldanbooru_tags_simple(&image);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  ML-Danbooru:  {:?} (general={})",
-                dur, r.general.len()),
+            Ok(r) => println!("  ML-Danbooru:  {:?} (general={})", dur, r.general.len()),
             Err(e) => println!("  ML-Danbooru:  FAILED - {}", e),
         }
 
@@ -49,8 +56,12 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::deepgelbooru::get_deepgelbooru_tags_simple(&image);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  DeepGelbooru: {:?} (general={}, character={})",
-                dur, r.general.len(), r.character.len()),
+            Ok(r) => println!(
+                "  DeepGelbooru: {:?} (general={}, character={})",
+                dur,
+                r.general.len(),
+                r.character.len()
+            ),
             Err(e) => println!("  DeepGelbooru: FAILED - {}", e),
         }
 
@@ -59,8 +70,12 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::wd14::get_wd14_tags_simple(&image);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  WD14:         {:?} (general={}, character={})",
-                dur, r.general.len(), r.character.len()),
+            Ok(r) => println!(
+                "  WD14:         {:?} (general={}, character={})",
+                dur,
+                r.general.len(),
+                r.character.len()
+            ),
             Err(e) => println!("  WD14:         FAILED - {}", e),
         }
 
@@ -69,8 +84,12 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::camie::get_camie_tags_simple(&image);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  Camie:        {:?} (general={}, character={})",
-                dur, r.general.len(), r.character.len()),
+            Ok(r) => println!(
+                "  Camie:        {:?} (general={}, character={})",
+                dur,
+                r.general.len(),
+                r.character.len()
+            ),
             Err(e) => println!("  Camie:        FAILED - {}", e),
         }
 
@@ -79,8 +98,12 @@ fn test_tagging_benchmark() {
         let result = dghs_imgutils_rs::tagging::pixai::get_pixai_tags(&image, "v0.9", None);
         let dur = start.elapsed();
         match result {
-            Ok(r) => println!("  PixAI:        {:?} (general={}, character={})",
-                dur, r.general.len(), r.character.len()),
+            Ok(r) => println!(
+                "  PixAI:        {:?} (general={}, character={})",
+                dur,
+                r.general.len(),
+                r.character.len()
+            ),
             Err(e) => println!("  PixAI:        FAILED - {}", e),
         }
     }
@@ -96,7 +119,11 @@ fn test_deepdanbooru_vs_python() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let mut image_path = PathBuf::from(manifest_dir);
     image_path.push("imgutils/test/testfile/skadi.jpg");
-    assert!(image_path.exists(), "Test image not found: {:?}", image_path);
+    assert!(
+        image_path.exists(),
+        "Test image not found: {:?}",
+        image_path
+    );
 
     // Python reference
     let mut cmd = std::process::Command::new("uv");

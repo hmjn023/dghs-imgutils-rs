@@ -5,7 +5,7 @@
 
 use dghs_imgutils_rs::detect::base::BBox;
 use dghs_imgutils_rs::operate::imgcensor::{CensorImageFit, censor_area_image, censor_areas_image};
-use image::{DynamicImage, RgbaImage, Rgba};
+use image::{DynamicImage, Rgba, RgbaImage};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -120,10 +120,7 @@ fn test_imgcensor_alpha_blend() {
 fn test_imgcensor_areas_multiple() {
     let mut target = RgbaImage::from_pixel(100, 100, Rgba([255, 255, 255, 255]));
     let stamp = make_test_stamp(10);
-    let areas: Vec<BBox> = vec![
-        (10, 10, 30, 30),
-        (60, 60, 80, 80),
-    ];
+    let areas: Vec<BBox> = vec![(10, 10, 30, 30), (60, 60, 80, 80)];
 
     censor_areas_image(&mut target, &areas, &stamp, CensorImageFit::Contain);
 
@@ -220,20 +217,30 @@ fn test_imgcensor_benchmark_and_precision() {
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {
         let stderr_str = String::from_utf8_lossy(&output.stderr);
-        eprintln!("⚠ Python side failed (non-critical):\n{}\n{}", stdout_str, stderr_str);
+        eprintln!(
+            "⚠ Python side failed (non-critical):\n{}\n{}",
+            stdout_str, stderr_str
+        );
         eprintln!("Skipping precision comparison.");
         return;
     }
 
     let py_output: PythonOperateOutput =
         serde_json::from_str(&stdout_str).expect("Failed to parse Python JSON output");
-    assert!(py_output.success, "Python inference failed: {:?}", py_output.error);
+    assert!(
+        py_output.success,
+        "Python inference failed: {:?}",
+        py_output.error
+    );
     println!("✓ Python reference: {:?}", py_duration);
 
     println!("\nSpeed comparison:");
     println!("  Rust:  {:?}", rust_duration);
     println!("  Python: {:?}", py_duration);
-    println!("  Speedup: {:.2}x", py_duration.as_secs_f64() / rust_duration.as_secs_f64());
+    println!(
+        "  Speedup: {:.2}x",
+        py_duration.as_secs_f64() / rust_duration.as_secs_f64()
+    );
 
     // --- Output size check ---
     let rust_file_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
