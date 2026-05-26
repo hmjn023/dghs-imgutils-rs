@@ -87,7 +87,7 @@ pub fn nsfw_pred_score(
     let (_shape, output_data) = outputs["dense_3"]
         .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
-    let probs: Vec<f32> = output_data.to_vec();
+    let _probs: Vec<f32> = output_data.to_vec();
     let probs: Vec<f32> = output_data.to_vec();
 
     let result: HashMap<String, f32> = NSFW_LABELS
