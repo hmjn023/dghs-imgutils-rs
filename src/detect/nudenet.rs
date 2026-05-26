@@ -4,14 +4,16 @@
 use crate::detect::base::Detection;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, InferenceError};
+use crate::inference::{InferenceError, create_onnx_session};
 use image::DynamicImage;
 use ndarray::{Array1, Array4};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-static NUDENET_YOLO_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
-static NUDENET_NMS_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
+static NUDENET_YOLO_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
+    Lazy::new(|| Mutex::new(None));
+static NUDENET_NMS_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// NudeNet の 18 クラスラベルの定義
 pub const NUDENET_LABELS: &[&str] = &[
@@ -48,12 +50,16 @@ pub fn preprocess_nudenet(
     let max_size = w.max(h);
 
     // 最大辺の正方形キャンバスを作成（白背景）
-    let mut canvas = image::ImageBuffer::from_pixel(max_size, max_size, image::Rgb([255, 255, 255]));
+    let mut canvas =
+        image::ImageBuffer::from_pixel(max_size, max_size, image::Rgb([255, 255, 255]));
     image::imageops::overlay(&mut canvas, &rgb_img, 0, 0);
 
     // ビリニア補間でリサイズを実行 (Triangle フィルタ)
-    let resized = image::DynamicImage::ImageRgb8(canvas)
-        .resize_exact(model_size, model_size, image::imageops::FilterType::Triangle);
+    let resized = image::DynamicImage::ImageRgb8(canvas).resize_exact(
+        model_size,
+        model_size,
+        image::imageops::FilterType::Triangle,
+    );
 
     // テンソル変換
     let tensor = to_ndarray_chw(&resized, &[0.0, 0.0, 0.0], &[1.0, 1.0, 1.0])
@@ -73,7 +79,9 @@ pub fn detect_with_nudenet(
     let repo_id = "deepghs/nudenet_onnx";
 
     // 1. YOLOv8 検出モデルの初期化・取得
-    let mut yolo_lock = NUDENET_YOLO_SESSION.lock().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut yolo_lock = NUDENET_YOLO_SESSION
+        .lock()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     if yolo_lock.is_none() {
         let path = hf_hub_download(repo_id, "320n.onnx", None, None)
             .map_err(|e| InferenceError::Initialization(e.to_string()))?;
@@ -82,7 +90,9 @@ pub fn detect_with_nudenet(
     let yolo_session = yolo_lock.as_mut().unwrap();
 
     // 2. NMS 処理モデルの初期化・取得
-    let mut nms_lock = NUDENET_NMS_SESSION.lock().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut nms_lock = NUDENET_NMS_SESSION
+        .lock()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     if nms_lock.is_none() {
         let path = hf_hub_download(repo_id, "nms-yolov8.onnx", None, None)
             .map_err(|e| InferenceError::Initialization(e.to_string()))?;
@@ -97,7 +107,8 @@ pub fn detect_with_nudenet(
     // 入力は "images"
     let yolo_inputs = ort::inputs!["images" => ort::value::Tensor::from_array(input_tensor)?];
     let yolo_outputs = yolo_session.run(yolo_inputs)?;
-    let output0 = yolo_outputs.get("output0")
+    let output0 = yolo_outputs
+        .get("output0")
         .ok_or_else(|| InferenceError::InvalidShape("Missing output0 from YOLOv8".to_string()))?;
 
     // 5. NMS 推論の実行
@@ -112,10 +123,12 @@ pub fn detect_with_nudenet(
     ];
 
     let nms_outputs = nms_session.run(nms_inputs)?;
-    let selected = nms_outputs.get("selected")
+    let selected = nms_outputs
+        .get("selected")
         .ok_or_else(|| InferenceError::InvalidShape("Missing selected from NMS".to_string()))?;
 
-    let (shape, slice) = selected.try_extract_tensor::<f32>()
+    let (shape, slice) = selected
+        .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let shape_usize: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
     let selected_view = ndarray::ArrayView::from_shape(shape_usize, slice)

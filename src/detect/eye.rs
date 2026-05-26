@@ -1,8 +1,8 @@
 //! アニメ画像の目検出処理を提供します。
 
 use crate::detect::base::Detection;
-use crate::inference::yolo_predict;
 use crate::inference::InferenceError;
+use crate::inference::yolo_predict;
 use image::DynamicImage;
 
 /// アニメ画像内の目を検出します。

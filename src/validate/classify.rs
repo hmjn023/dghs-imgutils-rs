@@ -5,8 +5,8 @@
 //! ここでは `inference::classify::classify_predict` / `classify_top1` を利用します。
 
 use crate::image::force_image_background;
-use crate::inference::classify::{classify_predict, classify_top1};
 use crate::inference::InferenceError;
+use crate::inference::classify::{classify_predict, classify_top1};
 use std::collections::HashMap;
 
 // ========================
@@ -17,17 +17,12 @@ const AI_CHECK_REPO: &str = "deepghs/anime_ai_check";
 const AI_CHECK_MODEL: &str = "mobilenetv3_sce_dist";
 
 /// AI 生成確信度スコア（0.0〜1.0）を返します。
-pub fn get_ai_created_score(
-    path: &str,
-    model_name: Option<&str>,
-) -> Result<f32, InferenceError> {
+pub fn get_ai_created_score(path: &str, model_name: Option<&str>) -> Result<f32, InferenceError> {
     let img = image::open(path).map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
     let rgb = force_image_background(&img, [255, 255, 255]);
     let model = model_name.unwrap_or(AI_CHECK_MODEL);
     let scores = classify_predict(&rgb, AI_CHECK_REPO, model)?;
-    Ok(*scores.get("ai").unwrap_or(
-        scores.get("AI").unwrap_or(&0.0),
-    ))
+    Ok(*scores.get("ai").unwrap_or(scores.get("AI").unwrap_or(&0.0)))
 }
 
 /// 画像が AI 生成かどうかを判定します（しきい値: 0.5）。
@@ -47,10 +42,7 @@ const MONO_REPO: &str = "deepghs/monochrome_detect";
 const MONO_MODEL: &str = "mobilenetv3_large_100_dist_safe2";
 
 /// モノクロ確信度スコア（0.0〜1.0）を返します。
-pub fn get_monochrome_score(
-    path: &str,
-    model_name: Option<&str>,
-) -> Result<f32, InferenceError> {
+pub fn get_monochrome_score(path: &str, model_name: Option<&str>) -> Result<f32, InferenceError> {
     let img = image::open(path).map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
     let rgb = force_image_background(&img, [255, 255, 255]);
     let model = model_name.unwrap_or(MONO_MODEL);
@@ -156,7 +148,11 @@ pub fn anime_completeness_score(
 ) -> Result<HashMap<String, f32>, InferenceError> {
     let img = image::open(path).map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
     let rgb = force_image_background(&img, [255, 255, 255]);
-    classify_predict(&rgb, COMPLETENESS_REPO, model_name.unwrap_or(COMPLETENESS_MODEL))
+    classify_predict(
+        &rgb,
+        COMPLETENESS_REPO,
+        model_name.unwrap_or(COMPLETENESS_MODEL),
+    )
 }
 
 pub fn anime_completeness(
@@ -165,7 +161,11 @@ pub fn anime_completeness(
 ) -> Result<(String, HashMap<String, f32>), InferenceError> {
     let img = image::open(path).map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
     let rgb = force_image_background(&img, [255, 255, 255]);
-    classify_top1(&rgb, COMPLETENESS_REPO, model_name.unwrap_or(COMPLETENESS_MODEL))
+    classify_top1(
+        &rgb,
+        COMPLETENESS_REPO,
+        model_name.unwrap_or(COMPLETENESS_MODEL),
+    )
 }
 
 // ========================

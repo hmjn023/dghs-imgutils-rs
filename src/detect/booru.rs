@@ -1,8 +1,8 @@
 //! Booru-YOLO モデルを用いた26クラスに及ぶ詳細なイラスト特徴・露出部位検出処理を提供します。
 
 use crate::detect::base::Detection;
-use crate::inference::yolo_predict;
 use crate::inference::InferenceError;
+use crate::inference::yolo_predict;
 use image::DynamicImage;
 
 /// Booru-YOLO モデルを用いてオブジェクト検出を実行します。

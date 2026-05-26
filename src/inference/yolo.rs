@@ -2,7 +2,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, run_onnx_session, InferenceError};
+use crate::inference::{InferenceError, create_onnx_session, run_onnx_session};
 use image::DynamicImage;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
@@ -63,12 +63,7 @@ pub fn preprocess_image_yolo(
 }
 
 /// 検出された座標を、前処理後の画像サイズからオリジナル画像サイズへ逆変換します。
-pub fn xy_postprocess(
-    x: f32,
-    y: f32,
-    old_size: (u32, u32),
-    new_size: (u32, u32),
-) -> (u32, u32) {
+pub fn xy_postprocess(x: f32, y: f32, old_size: (u32, u32), new_size: (u32, u32)) -> (u32, u32) {
     let old_w = old_size.0 as f32;
     let old_h = old_size.1 as f32;
     let new_w = new_size.0 as f32;
@@ -88,22 +83,13 @@ pub fn yolo_xywh2xyxy(bbox: &[f32; 4]) -> [f32; 4] {
     let cy = bbox[1];
     let w = bbox[2];
     let h = bbox[3];
-    [
-        cx - w / 2.0,
-        cy - h / 2.0,
-        cx + w / 2.0,
-        cy + h / 2.0,
-    ]
+    [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
 }
 
 /// BBox に対する Non-Maximum Suppression (非極大値抑制) の等価 Rust 実装。
 ///
 /// Python 版の `_yolo_nms` の数式と完全に同一のピクセル補正係数 `+ 1.0` を含みます。
-pub fn yolo_nms(
-    boxes: &[[f32; 4]],
-    scores: &[f32],
-    iou_threshold: f32,
-) -> Vec<usize> {
+pub fn yolo_nms(boxes: &[[f32; 4]], scores: &[f32], iou_threshold: f32) -> Vec<usize> {
     if boxes.is_empty() {
         return Vec::new();
     }
@@ -117,7 +103,11 @@ pub fn yolo_nms(
 
     // スコアの降順にソート
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| scores[b].partial_cmp(&scores[a]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|&a, &b| {
+        scores[b]
+            .partial_cmp(&scores[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut keep = Vec::new();
     while !order.is_empty() {
@@ -308,7 +298,8 @@ pub fn postprocess_rtdetr(
 }
 
 // スレッドセーフな ONNX セッションのキャッシュ
-static SESSION_CACHE: Lazy<Mutex<HashMap<(String, String), ort::session::Session>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SESSION_CACHE: Lazy<Mutex<HashMap<(String, String), ort::session::Session>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// 汎用 YOLOv8 物体検出を実行します。
 pub fn yolo_predict(
@@ -320,7 +311,9 @@ pub fn yolo_predict(
     iou_threshold: f32,
     labels: &[String],
 ) -> Result<Vec<DetectionResult>, InferenceError> {
-    let mut cache = SESSION_CACHE.lock().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut cache = SESSION_CACHE
+        .lock()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let key = (repo_id.to_string(), model_name.to_string());
 
     if !cache.contains_key(&key) {
@@ -336,15 +329,18 @@ pub fn yolo_predict(
     let session = cache.get_mut(&key).unwrap();
 
     // 前処理
-    let (input_tensor, old_size, new_size) = preprocess_image_yolo(image, max_infer_size, false, 32)?;
+    let (input_tensor, old_size, new_size) =
+        preprocess_image_yolo(image, max_infer_size, false, 32)?;
 
     // 推論の実行
     let outputs = run_onnx_session(session, "images", &input_tensor)?;
-    
-    let output0 = outputs.get("output0")
+
+    let output0 = outputs
+        .get("output0")
         .ok_or_else(|| InferenceError::InvalidShape("Missing output0".to_string()))?;
 
-    let (shape, slice) = output0.try_extract_tensor::<f32>()
+    let (shape, slice) = output0
+        .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let shape_usize: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
     let output0_view = ndarray::ArrayView::from_shape(shape_usize, slice)
@@ -356,6 +352,13 @@ pub fn yolo_predict(
     let output_array = output0_view.index_axis(ndarray::Axis(0), 0).to_owned();
 
     // NMS後処理
-    let results = postprocess_nms_yolo(&output_array, conf_threshold, iou_threshold, old_size, new_size, labels)?;
+    let results = postprocess_nms_yolo(
+        &output_array,
+        conf_threshold,
+        iou_threshold,
+        old_size,
+        new_size,
+        labels,
+    )?;
     Ok(results)
 }

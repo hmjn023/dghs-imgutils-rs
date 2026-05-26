@@ -64,8 +64,7 @@ pub fn edge_image_with_canny(
     let edges: GrayImage = canny(&gray, low_threshold, high_threshold);
 
     let (w, h) = edges.dimensions();
-    let mut canvas: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_pixel(w, h, Rgb(backcolor));
+    let mut canvas: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_pixel(w, h, Rgb(backcolor));
 
     let fore = forecolor;
     for y in 0..h {

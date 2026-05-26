@@ -54,7 +54,11 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
     let mut image_path = PathBuf::from(manifest_dir);
     image_path.push(test_image_rel_path);
 
-    assert!(image_path.exists(), "Test image not found: {:?}", image_path);
+    assert!(
+        image_path.exists(),
+        "Test image not found: {:?}",
+        image_path
+    );
 
     println!("\n📸 タスク [{}], 画像: {}", task_type, test_image_rel_path);
     println!("------------------------------------------------------------");
@@ -102,7 +106,13 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
         "censor" => detect_censors(&image, "s", "v1.0", 0.3, 0.7).unwrap(),
         "booru" => detect_with_booru_yolo(&image, "yolov8s_aa11", 0.25, 0.7).unwrap(),
         "nudenet" => detect_with_nudenet(&image, 100, 0.45, 0.25).unwrap(),
-        "text" => detect_text(&image, "dbnetpp_resnet50_fpnc_1200e_icdar2015", 0.05, Some(640)).unwrap(),
+        "text" => detect_text(
+            &image,
+            "dbnetpp_resnet50_fpnc_1200e_icdar2015",
+            0.05,
+            Some(640),
+        )
+        .unwrap(),
         _ => panic!("Unknown task type: {}", task_type),
     };
     let rust_duration = rust_start.elapsed();
@@ -132,7 +142,10 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
     let sims = bboxes_similarity(&rust_bboxes, &py_bboxes);
     let matched_count = sims.iter().filter(|&&v| v > 0.3).count();
 
-    println!("  最適ペアリングマッチング数 (IoU > 0.3): {} 件", matched_count);
+    println!(
+        "  最適ペアリングマッチング数 (IoU > 0.3): {} 件",
+        matched_count
+    );
 
     if !py_output.detections.is_empty() && !rust_results.is_empty() {
         // 最低でも 1 件以上のマッチングが成功すること（画像はそれぞれ何らかの検出対象を含むものを選定）

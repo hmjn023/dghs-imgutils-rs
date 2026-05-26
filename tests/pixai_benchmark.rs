@@ -94,10 +94,10 @@ fn test_pixai_precision_and_benchmark() {
 
         // 2. Rust 側の推論実行
         let image = image::open(&image_path).expect("Failed to open test image in Rust");
-        
+
         let rust_start = Instant::now();
-        let rust_result = get_pixai_tags(&image, "v0.9", None)
-            .expect("Rust 側でのタグ予測に失敗しました");
+        let rust_result =
+            get_pixai_tags(&image, "v0.9", None).expect("Rust 側でのタグ予測に失敗しました");
         let rust_duration = rust_start.elapsed();
         println!("✓ Rust 版推論完了   (所要時間: {:?})", rust_duration);
 
