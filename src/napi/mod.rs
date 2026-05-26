@@ -247,3 +247,4 @@ pub fn ccip_cluster(
 
 pub mod detect;
 pub mod segment;
+pub mod tagging;
