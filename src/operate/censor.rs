@@ -6,6 +6,7 @@
 use crate::detect::base::Detection;
 use crate::detect::censor::detect_censors as core_detect_censors;
 use crate::inference::InferenceError;
+use crate::operate::imgcensor::CensorImageFit;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, imageops::FilterType};
 use imageproc::filter::gaussian_blur_f32;
 use thiserror::Error;
@@ -29,6 +30,8 @@ pub enum CensorMethod {
     Blur { radius: f32 },
     /// 単色塗りつぶし。`color` は RGB
     Color { color: [u8; 3] },
+    /// 画像（スタンプ・絵文字）オーバーレイ。アルファブレンドで合成
+    Image { image: DynamicImage, fit: CensorImageFit },
 }
 
 impl Default for CensorMethod {
@@ -78,6 +81,13 @@ pub fn censor_area(
             let canvas: ImageBuffer<Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_pixel(bw, bh, Rgb(*color));
             DynamicImage::ImageRgb8(canvas)
+        }
+        CensorMethod::Image { image: censor_img, fit } => {
+            let mut rgba = img.to_rgba8();
+            let area_f32 = [bx1 as f32, by1 as f32, bx2 as f32, by2 as f32];
+            crate::operate::imgcensor::censor_area_image(&mut rgba, &area_f32, censor_img, *fit);
+            // Extract just the censored region for the paste loop below
+            DynamicImage::ImageRgba8(rgba).crop_imm(x0, y0, bw, bh)
         }
     };
 
@@ -144,6 +154,38 @@ pub fn censor_nsfw(
         .collect();
 
     let mut result = img;
+    for det in &filtered {
+        result = censor_area(&result, det, method);
+    }
+    Ok(result)
+}
+
+/// 検出された NSFW 部位に画像（スタンプ・絵文字）検閲を適用します。
+///
+/// `censor_nsfw` の画像直接受け取り版。`DynamicImage` を入力とします。
+pub fn censor_nsfw_image(
+    image: &DynamicImage,
+    method: &CensorMethod,
+    nipple_f: bool,
+    penis: bool,
+    pussy: bool,
+) -> Result<DynamicImage, CensorError> {
+    let detections = core_detect_censors(image, "s", "v1.0", 0.3, 0.5)?;
+
+    let target_labels: Vec<&str> = {
+        let mut labels = Vec::new();
+        if nipple_f { labels.push("nipple_f"); }
+        if penis { labels.push("penis"); }
+        if pussy { labels.push("pussy"); }
+        labels
+    };
+
+    let filtered: Vec<Detection> = detections
+        .into_iter()
+        .filter(|d| target_labels.contains(&d.label.as_str()))
+        .collect();
+
+    let mut result = image.clone();
     for det in &filtered {
         result = censor_area(&result, det, method);
     }
