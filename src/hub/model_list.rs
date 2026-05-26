@@ -422,6 +422,45 @@ pub static ALL_MODELS: &[ModelEntry] = &[
         "DWpose: RTMPose-x キーポイント推定モデル (384x288)",
     ),
     // ==========================================
+    // restore/nafnet.py  ─ NafNet 画像復元 (REDS / GoPro / SIDD)
+    // ==========================================
+    ModelEntry::model(
+        "deepghs/image_restoration",
+        "NAFNet-REDS-width64.onnx",
+        "NafNet(REDS): 画像復元",
+    ),
+    ModelEntry::model(
+        "deepghs/image_restoration",
+        "NAFNet-GoPro-width64.onnx",
+        "NafNet(GoPro): 画像復元",
+    ),
+    ModelEntry::model(
+        "deepghs/image_restoration",
+        "NAFNet-SIDD-width64.onnx",
+        "NafNet(SIDD): 画像復元",
+    ),
+    // ==========================================
+    // restore/scunet.py  ─ SCUNet 画像復元 (GAN / PSNR)
+    // ==========================================
+    ModelEntry::model(
+        "deepghs/image_restoration",
+        "SCUNet-GAN.onnx",
+        "SCUNet(GAN): 画像復元",
+    ),
+    ModelEntry::model(
+        "deepghs/image_restoration",
+        "SCUNet-PSNR.onnx",
+        "SCUNet(PSNR): 画像復元",
+    ),
+    // ==========================================
+    // upscale/cdc.py  ─ CDC アニメ超解像
+    // ==========================================
+    ModelEntry::model(
+        "deepghs/cdc_anime_onnx",
+        "HGSR-MHR-anime-aug_X4_320.onnx",
+        "CDC: アニメ 4x 超解像",
+    ),
+    // ==========================================
     // ocr/  ─ PaddleOCR (DBNet 検出 + CRNN 認識)
     // ==========================================
     ModelEntry::model(

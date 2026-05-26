@@ -57,6 +57,12 @@ pub mod ascii;
 /// 汎用 ML エンジン（CLIP, SigLIP, YOLO-Seg, TIMM 分類、画像拡張）。
 pub mod generic;
 
+/// 画像復元（NafNet / SCUNet / Adversarial ノイズ除去）。
+pub mod restore;
+
+/// 画像超解像（CDC アップスケーリング）。
+pub mod upscale;
+
 /// リソース管理（背景画像、データセットファイル等）。
 pub mod resource;
 

@@ -478,6 +478,7 @@ pub fn get_title() -> String {
 
 pub mod detect;
 pub mod generic;
+pub mod restore_upscale;
 pub mod metadata_sd;
 pub mod metrics;
 pub mod ocr;
