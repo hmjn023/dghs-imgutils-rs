@@ -1,17 +1,17 @@
 //! アニメ・イラスト画像の自動タグ付け（タガー）機能を提供します。
 
-pub mod pixai;
-pub mod deepdanbooru;
-pub mod mldanbooru;
-pub mod deepgelbooru;
-pub mod wd14;
+pub mod blacklist;
 pub mod camie;
-pub mod tag_match;
+pub mod character;
+pub mod deepdanbooru;
+pub mod deepgelbooru;
 pub mod format;
+pub mod mldanbooru;
 pub mod order;
 pub mod overlap;
-pub mod blacklist;
-pub mod character;
+pub mod pixai;
+pub mod tag_match;
+pub mod wd14;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

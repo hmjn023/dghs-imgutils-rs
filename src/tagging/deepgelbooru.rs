@@ -29,50 +29,83 @@ fn apply_preprocessing(image: &DynamicImage, stages: &[serde_json::Value]) -> Ar
         let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match ttype {
             "resize" => {
-                let size = stage.get("size").and_then(|v| {
-                    if let Some(n) = v.as_u64() { Some(n as u32) }
-                    else if let Some(arr) = v.as_array() {
-                        arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
-                    } else { None }
-                }).unwrap_or(448);
+                let size = stage
+                    .get("size")
+                    .and_then(|v| {
+                        if let Some(n) = v.as_u64() {
+                            Some(n as u32)
+                        } else if let Some(arr) = v.as_array() {
+                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(448);
                 let (w, h) = img.dimensions();
                 let (nw, nh) = if w < h {
                     (size, (size as f64 * h as f64 / w as f64) as u32)
                 } else {
                     ((size as f64 * w as f64 / h as f64) as u32, size)
                 };
-                img = img.resize_exact(nw.max(1), nh.max(1), image::imageops::FilterType::CatmullRom);
+                img = img.resize_exact(
+                    nw.max(1),
+                    nh.max(1),
+                    image::imageops::FilterType::CatmullRom,
+                );
             }
             "center_crop" => {
-                let size = stage.get("size").and_then(|v| {
-                    if let Some(n) = v.as_u64() { Some(n as u32) }
-                    else if let Some(arr) = v.as_array() {
-                        arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
-                    } else { None }
-                }).unwrap_or(448);
+                let size = stage
+                    .get("size")
+                    .and_then(|v| {
+                        if let Some(n) = v.as_u64() {
+                            Some(n as u32)
+                        } else if let Some(arr) = v.as_array() {
+                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(448);
                 let (w, h) = img.dimensions();
                 let x = (w.saturating_sub(size)) / 2;
                 let y = (h.saturating_sub(size)) / 2;
                 img = img.crop_imm(x, y, size.min(w - x), size.min(h - y));
             }
             "pad_to_size" => {
-                let size_val = stage.get("size").and_then(|v| {
-                    if let Some(arr) = v.as_array() {
-                        if arr.len() >= 2 {
-                            Some((arr[0].as_u64().unwrap_or(448) as u32, arr[1].as_u64().unwrap_or(448) as u32))
+                let size_val = stage
+                    .get("size")
+                    .and_then(|v| {
+                        if let Some(arr) = v.as_array() {
+                            if arr.len() >= 2 {
+                                Some((
+                                    arr[0].as_u64().unwrap_or(448) as u32,
+                                    arr[1].as_u64().unwrap_or(448) as u32,
+                                ))
+                            } else {
+                                let s = arr[0].as_u64().unwrap_or(448) as u32;
+                                Some((s, s))
+                            }
+                        } else if let Some(n) = v.as_u64() {
+                            Some((n as u32, n as u32))
                         } else {
-                            let s = arr[0].as_u64().unwrap_or(448) as u32;
-                            Some((s, s))
+                            None
                         }
-                    } else if let Some(n) = v.as_u64() {
-                        Some((n as u32, n as u32))
-                    } else { None }
-                }).unwrap_or((448, 448));
-                let bg = stage.get("background_color").and_then(|v| {
-                    if let Some(s) = v.as_str() {
-                        if s == "white" { Some([255u8, 255, 255]) } else { Some([0u8, 0, 0]) }
-                    } else { None }
-                }).unwrap_or([255, 255, 255]);
+                    })
+                    .unwrap_or((448, 448));
+                let bg = stage
+                    .get("background_color")
+                    .and_then(|v| {
+                        if let Some(s) = v.as_str() {
+                            if s == "white" {
+                                Some([255u8, 255, 255])
+                            } else {
+                                Some([0u8, 0, 0])
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or([255, 255, 255]);
                 img = crate::image::pad_image_to_size(&img, size_val.0, size_val.1, bg);
             }
             "to_tensor" | "maybe_to_tensor" => {}
@@ -98,16 +131,35 @@ fn apply_preprocessing(image: &DynamicImage, stages: &[serde_json::Value]) -> Ar
         let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match ttype {
             "rescale" => {
-                let factor = stage.get("rescale_factor").and_then(|v| v.as_f64()).unwrap_or(1.0 / 255.0) as f32;
+                let factor = stage
+                    .get("rescale_factor")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0 / 255.0) as f32;
                 array.mapv_inplace(|v| v * factor);
             }
             "normalize" => {
-                let mean = stage.get("mean").and_then(|v| {
-                    v.as_array().map(|arr| arr.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect::<Vec<_>>())
-                }).unwrap_or_else(|| vec![0.0; 3]);
-                let std = stage.get("std").and_then(|v| {
-                    v.as_array().map(|arr| arr.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect::<Vec<_>>())
-                }).unwrap_or_else(|| vec![1.0; 3]);
+                let mean = stage
+                    .get("mean")
+                    .and_then(|v| {
+                        v.as_array().map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_f64())
+                                .map(|x| x as f32)
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .unwrap_or_else(|| vec![0.0; 3]);
+                let std = stage
+                    .get("std")
+                    .and_then(|v| {
+                        v.as_array().map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_f64())
+                                .map(|x| x as f32)
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .unwrap_or_else(|| vec![1.0; 3]);
                 for y in 0..h as usize {
                     for x in 0..w as usize {
                         for c in 0..3 {

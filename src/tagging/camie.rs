@@ -33,25 +33,43 @@ fn apply_preprocess_to_chw(image: &DynamicImage, stages: &[serde_json::Value]) -
         let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match ttype {
             "resize" => {
-                let size = stage.get("size").and_then(|v| {
-                    if let Some(n) = v.as_u64() { Some(n as u32) }
-                    else if let Some(arr) = v.as_array() { arr.first().and_then(|x| x.as_u64()).map(|x| x as u32) }
-                    else { None }
-                }).unwrap_or(384);
+                let size = stage
+                    .get("size")
+                    .and_then(|v| {
+                        if let Some(n) = v.as_u64() {
+                            Some(n as u32)
+                        } else if let Some(arr) = v.as_array() {
+                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(384);
                 let (w, h) = img.dimensions();
                 let (nw, nh) = if w < h {
                     (size, (size as f64 * h as f64 / w as f64) as u32)
                 } else {
                     ((size as f64 * w as f64 / h as f64) as u32, size)
                 };
-                img = img.resize_exact(nw.max(1), nh.max(1), image::imageops::FilterType::CatmullRom);
+                img = img.resize_exact(
+                    nw.max(1),
+                    nh.max(1),
+                    image::imageops::FilterType::CatmullRom,
+                );
             }
             "center_crop" => {
-                let size = stage.get("size").and_then(|v| {
-                    if let Some(n) = v.as_u64() { Some(n as u32) }
-                    else if let Some(arr) = v.as_array() { arr.first().and_then(|x| x.as_u64()).map(|x| x as u32) }
-                    else { None }
-                }).unwrap_or(384);
+                let size = stage
+                    .get("size")
+                    .and_then(|v| {
+                        if let Some(n) = v.as_u64() {
+                            Some(n as u32)
+                        } else if let Some(arr) = v.as_array() {
+                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(384);
                 let (w, h) = img.dimensions();
                 let x = (w.saturating_sub(size)) / 2;
                 let y = (h.saturating_sub(size)) / 2;
@@ -85,16 +103,35 @@ fn apply_preprocess_to_chw(image: &DynamicImage, stages: &[serde_json::Value]) -
         let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match ttype {
             "rescale" => {
-                let factor = stage.get("rescale_factor").and_then(|v| v.as_f64()).unwrap_or(1.0 / 255.0) as f32;
+                let factor = stage
+                    .get("rescale_factor")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0 / 255.0) as f32;
                 array.mapv_inplace(|v| v * factor);
             }
             "normalize" => {
-                let mean: Vec<f32> = stage.get("mean").and_then(|v| {
-                    v.as_array().map(|arr| arr.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect())
-                }).unwrap_or_else(|| vec![0.0; 3]);
-                let std: Vec<f32> = stage.get("std").and_then(|v| {
-                    v.as_array().map(|arr| arr.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect())
-                }).unwrap_or_else(|| vec![1.0; 3]);
+                let mean: Vec<f32> = stage
+                    .get("mean")
+                    .and_then(|v| {
+                        v.as_array().map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_f64())
+                                .map(|x| x as f32)
+                                .collect()
+                        })
+                    })
+                    .unwrap_or_else(|| vec![0.0; 3]);
+                let std: Vec<f32> = stage
+                    .get("std")
+                    .and_then(|v| {
+                        v.as_array().map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_f64())
+                                .map(|x| x as f32)
+                                .collect()
+                        })
+                    })
+                    .unwrap_or_else(|| vec![1.0; 3]);
                 for c in 0..3 {
                     let m = mean.get(c).copied().unwrap_or(0.0);
                     let s = std.get(c).copied().unwrap_or(1.0);
@@ -109,11 +146,7 @@ fn apply_preprocess_to_chw(image: &DynamicImage, stages: &[serde_json::Value]) -
     array
 }
 
-fn get_threshold_value(
-    config: &serde_json::Value,
-    cate_name: &str,
-    mode: &str,
-) -> f32 {
+fn get_threshold_value(config: &serde_json::Value, cate_name: &str, mode: &str) -> f32 {
     if let Some(obj) = config.get(cate_name) {
         if let Some(mode_obj) = obj.get(mode) {
             if let Some(th) = mode_obj.get("threshold").and_then(|v| v.as_f64()) {
@@ -150,9 +183,24 @@ pub fn get_camie_tags(
     thresholds: Option<HashMap<String, f32>>,
     no_underline: bool,
 ) -> Result<TagResult, TaggingError> {
-    let preproc_path = hf_hub_download(REPO_ID, &format!("{}/preprocess.json", model_name), None, None)?;
-    let tags_path = hf_hub_download(REPO_ID, &format!("{}/selected_tags.csv", model_name), None, None)?;
-    let thresh_path = hf_hub_download(REPO_ID, &format!("{}/threshold.json", model_name), None, None)?;
+    let preproc_path = hf_hub_download(
+        REPO_ID,
+        &format!("{}/preprocess.json", model_name),
+        None,
+        None,
+    )?;
+    let tags_path = hf_hub_download(
+        REPO_ID,
+        &format!("{}/selected_tags.csv", model_name),
+        None,
+        None,
+    )?;
+    let thresh_path = hf_hub_download(
+        REPO_ID,
+        &format!("{}/threshold.json", model_name),
+        None,
+        None,
+    )?;
     let model_path = hf_hub_download(REPO_ID, &format!("{}/model.onnx", model_name), None, None)?;
 
     let preproc_content = std::fs::read_to_string(preproc_path)?;
@@ -165,8 +213,14 @@ pub fn get_camie_tags(
     let input_tensor = apply_preprocess_to_chw(&rgb, &preproc.stages);
 
     let mut session = create_onnx_session(&model_path)?;
-    let output_names: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
-    let has_refined = output_names.iter().any(|n| n == "embedding" || n == "refined/embedding");
+    let output_names: Vec<String> = session
+        .outputs()
+        .iter()
+        .map(|o| o.name().to_string())
+        .collect();
+    let has_refined = output_names
+        .iter()
+        .any(|n| n == "embedding" || n == "refined/embedding");
 
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tag_defs = Vec::new();
@@ -183,14 +237,18 @@ pub fn get_camie_tags(
             "input" => ort::value::Tensor::from_array(input_tensor.clone())?
         ])?;
 
-        let refined_pred = outputs.get("output").or_else(|| outputs.get("refined/output")).ok_or_else(|| {
-            TaggingError::InvalidArgument("No refined output found".to_string())
-        })?;
+        let refined_pred = outputs
+            .get("output")
+            .or_else(|| outputs.get("refined/output"))
+            .ok_or_else(|| TaggingError::InvalidArgument("No refined output found".to_string()))?;
         let (_shape, refined_pred_data) = refined_pred.try_extract_tensor::<f32>()?;
 
-        let refined_emb = outputs.get("embedding").or_else(|| outputs.get("refined/embedding")).ok_or_else(|| {
-            TaggingError::InvalidArgument("No refined embedding found".to_string())
-        })?;
+        let refined_emb = outputs
+            .get("embedding")
+            .or_else(|| outputs.get("refined/embedding"))
+            .ok_or_else(|| {
+                TaggingError::InvalidArgument("No refined embedding found".to_string())
+            })?;
         let (_emb_shape, refined_emb_data) = refined_emb.try_extract_tensor::<f32>()?;
 
         (refined_pred_data.to_vec(), Some(refined_emb_data.to_vec()))
@@ -199,9 +257,10 @@ pub fn get_camie_tags(
             "input" => ort::value::Tensor::from_array(input_tensor.clone())?
         ])?;
 
-        let init_pred = outputs.get("output").or_else(|| outputs.get("initial/output")).ok_or_else(|| {
-            TaggingError::InvalidArgument("No initial output found".to_string())
-        })?;
+        let init_pred = outputs
+            .get("output")
+            .or_else(|| outputs.get("initial/output"))
+            .ok_or_else(|| TaggingError::InvalidArgument("No initial output found".to_string()))?;
         let (_shape, init_pred_data) = init_pred.try_extract_tensor::<f32>()?;
 
         (init_pred_data.to_vec(), None)
@@ -218,7 +277,9 @@ pub fn get_camie_tags(
 
     let mut category_indices: HashMap<&str, Vec<usize>> = HashMap::new();
     for (cate_name, cate_id) in CATEGORY_MAP {
-        let indices: Vec<usize> = tag_defs.iter().enumerate()
+        let indices: Vec<usize> = tag_defs
+            .iter()
+            .enumerate()
             .filter(|(_, t)| t.category == *cate_id)
             .map(|(i, _)| i)
             .collect();

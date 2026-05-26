@@ -18,7 +18,11 @@ const MODEL_NAMES: &[(&str, &str, u32)] = &[
     ("ViT_Large", "SmilingWolf/wd-vit-large-tagger-v3", 384),
     ("EVA02_Large", "SmilingWolf/wd-eva02-large-tagger-v3", 448),
     ("MOAT", "SmilingWolf/wd-v1-4-moat-tagger-v2", 224),
-    ("ConvNextV2", "SmilingWolf/wd-v1-4-convnextv2-tagger-v2", 224),
+    (
+        "ConvNextV2",
+        "SmilingWolf/wd-v1-4-convnextv2-tagger-v2",
+        224,
+    ),
 ];
 
 const DEFAULT_MODEL: &str = "SwinV2_v3";
@@ -48,14 +52,19 @@ fn prepare_image_for_tagging(image: &DynamicImage, target_size: u32) -> Array4<f
     } else {
         let pad_left = (max_dim - w) / 2;
         let pad_top = (max_dim - h) / 2;
-        let mut canvas = image::ImageBuffer::from_pixel(max_dim, max_dim, image::Rgb([255, 255, 255]));
+        let mut canvas =
+            image::ImageBuffer::from_pixel(max_dim, max_dim, image::Rgb([255, 255, 255]));
         let rgb8 = force_image_background(image, [255, 255, 255]).to_rgb8();
         image::imageops::overlay(&mut canvas, &rgb8, pad_left as i64, pad_top as i64);
         DynamicImage::ImageRgb8(canvas)
     };
 
     let resized = if max_dim != target_size {
-        padded.resize_exact(target_size, target_size, image::imageops::FilterType::CatmullRom)
+        padded.resize_exact(
+            target_size,
+            target_size,
+            image::imageops::FilterType::CatmullRom,
+        )
     } else {
         padded
     };
@@ -150,12 +159,31 @@ pub fn get_wd14_tags(
         )));
     }
 
-    let labels: Vec<(String, f32)> = tag_defs.iter().zip(prediction.iter()).map(|(t, &p)| (t.name.clone(), p)).collect();
+    let labels: Vec<(String, f32)> = tag_defs
+        .iter()
+        .zip(prediction.iter())
+        .map(|(t, &p)| (t.name.clone(), p))
+        .collect();
 
-    let rating: Vec<(String, f32)> = labels.iter().enumerate().filter(|(i, _)| tag_defs[*i].category == 9).map(|(_, v)| v.clone()).collect();
+    let rating: Vec<(String, f32)> = labels
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| tag_defs[*i].category == 9)
+        .map(|(_, v)| v.clone())
+        .collect();
 
-    let general_indices: Vec<usize> = tag_defs.iter().enumerate().filter(|(_, t)| t.category == 0).map(|(i, _)| i).collect();
-    let character_indices: Vec<usize> = tag_defs.iter().enumerate().filter(|(_, t)| t.category == 4).map(|(i, _)| i).collect();
+    let general_indices: Vec<usize> = tag_defs
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.category == 0)
+        .map(|(i, _)| i)
+        .collect();
+    let character_indices: Vec<usize> = tag_defs
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.category == 4)
+        .map(|(i, _)| i)
+        .collect();
 
     let mut general_th = general_threshold;
     if general_mcut_enabled {

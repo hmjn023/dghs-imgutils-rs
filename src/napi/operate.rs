@@ -5,8 +5,8 @@
 //! - `censor_areas_image`: 複数 BBox 領域に画像検閲
 
 use crate::detect::base::BBox;
-use crate::operate::censor::censor_nsfw_image as core_censor_nsfw_image;
 use crate::operate::censor::CensorMethod;
+use crate::operate::censor::censor_nsfw_image as core_censor_nsfw_image;
 use crate::operate::imgcensor::{CensorImageFit, censor_areas_image as core_censor_areas_image};
 use napi_derive::napi;
 
@@ -53,14 +53,12 @@ pub fn censor_nsfw_image(
     })?;
 
     let censor_img = match censor_image_buffer {
-        Some(buf) => {
-            image::load_from_memory(&buf).map_err(|e| {
-                napi::Error::new(
-                    napi::Status::InvalidArg,
-                    format!("Failed to decode censor image buffer: {}", e),
-                )
-            })?
-        }
+        Some(buf) => image::load_from_memory(&buf).map_err(|e| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("Failed to decode censor image buffer: {}", e),
+            )
+        })?,
         None => {
             // Default: solid red stamp (256x256)
             let mut img = image::RgbaImage::new(256, 256);
@@ -94,12 +92,14 @@ pub fn censor_nsfw_image(
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());
-    result.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to encode output image: {}", e),
-        )
-    })?;
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
 
     Ok(buf.into_inner())
 }
@@ -152,12 +152,14 @@ pub fn censor_areas_with_image(
 
     let result = image::DynamicImage::ImageRgba8(rgba);
     let mut buf = std::io::Cursor::new(Vec::new());
-    result.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to encode output image: {}", e),
-        )
-    })?;
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
 
     Ok(buf.into_inner())
 }
