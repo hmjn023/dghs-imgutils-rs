@@ -4,6 +4,7 @@ use crate::metrics::ccip::{
     ccip_merge as core_ccip_merge, ccip_same as core_ccip_same,
 };
 use crate::tagging::pixai::get_pixai_tags as core_get_pixai_tags;
+use image::DynamicImage;
 use napi_derive::napi;
 use std::collections::HashMap;
 
@@ -298,6 +299,181 @@ pub fn ccip_cluster(
         })?;
 
     Ok(clusters.into_iter().map(|v| v as i32).collect())
+}
+
+/// 指定したローカル画像ファイルを読み込み、RGBA 画像の場合は白背景をブレンドして RGB 画像として返します。
+/// 戻り値は RGBA (R, G, B, A) のピクセル配列です。
+///
+/// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
+/// * `force_background`: 背景色の RGB 値（例: `[255, 255, 255]`）。省略時は白背景。
+#[napi]
+pub fn load_image_from_file(
+    path: String,
+    force_background: Option<Vec<f64>>,
+) -> napi::Result<Vec<u8>> {
+    let img = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {e}"),
+        )
+    })?;
+
+    let bg = force_background.map(|v| {
+        if v.len() != 3 {
+            [255, 255, 255]
+        } else {
+            [v[0] as u8, v[1] as u8, v[2] as u8]
+        }
+    });
+
+    let img = if let Some(bg) = bg {
+        if img.color().has_alpha() {
+            crate::image::force_image_background(&img, bg)
+        } else {
+            img
+        }
+    } else {
+        img
+    };
+
+    let rgba = img.to_rgba8();
+    Ok(rgba.into_raw())
+}
+
+/// 指定した URL から画像をダウンロードして読み込みます。
+#[napi]
+pub fn load_image_from_url(url: String) -> napi::Result<Vec<u8>> {
+    use crate::image::load::{ImageSource, load_image};
+    let img = load_image(&ImageSource::HttpUrl(&url)).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to load from URL: {e}"),
+        )
+    })?;
+    let rgba = img.to_rgba8();
+    Ok(rgba.into_raw())
+}
+
+/// RGB エンコード: 画像をテンソル（CHW 順序、float32）に変換します。
+/// 戻り値はフラットな f64 配列です（形状は [C, H, W]）。
+#[napi]
+pub fn rgb_encode(
+    path: String,
+    order: Option<String>,
+    use_float: Option<bool>,
+) -> napi::Result<Vec<f64>> {
+    let img = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {e}"),
+        )
+    })?;
+    let order = order.unwrap_or_else(|| "CHW".to_string());
+    let use_float = use_float.unwrap_or(true);
+
+    let encoded = crate::image::rgb_encode(&img, &order, use_float).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("RGB encode failed: {e}"),
+        )
+    })?;
+
+    Ok(encoded.iter().map(|&v| v as f64).collect())
+}
+
+/// RGB デコード: テンソル（CHW 順序、float32）を画像に変換し、ファイルに保存します。
+#[napi]
+pub fn rgb_decode(
+    tensor: Vec<f64>,
+    shape_c: u32,
+    shape_h: u32,
+    shape_w: u32,
+    order: Option<String>,
+    output_path: String,
+) -> napi::Result<()> {
+    let order = order.unwrap_or_else(|| "CHW".to_string());
+    let arr = ndarray::Array3::from_shape_vec(
+        (shape_c as usize, shape_h as usize, shape_w as usize),
+        tensor.into_iter().map(|v| v as f32).collect(),
+    )
+    .map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Invalid tensor shape: {e}"),
+        )
+    })?;
+
+    let img = crate::image::rgb_decode(&arr.view(), &order).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("RGB decode failed: {e}"),
+        )
+    })?;
+
+    img.save(&output_path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to save image: {e}"),
+        )
+    })?;
+
+    Ok(())
+}
+
+/// 複数の画像レイヤーを合成します。
+/// `layers` は画像パスの配列、`alphas` は各レイヤーの透明度の配列です。
+/// 戻り値は RGBA ピクセル配列です。
+#[napi]
+pub fn istack(
+    layers: Vec<String>,
+    alphas: Vec<f64>,
+    output_width: Option<u32>,
+    output_height: Option<u32>,
+) -> napi::Result<Vec<u8>> {
+    if layers.len() != alphas.len() {
+        return Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            "layers and alphas must have the same length".to_string(),
+        ));
+    }
+
+    let items: Vec<crate::image::LayerItemBuilder> = layers
+        .iter()
+        .zip(alphas.iter())
+        .map(|(path, alpha)| {
+            let img = image::open(path)
+                .unwrap_or_else(|_| DynamicImage::ImageRgba8(image::RgbaImage::new(1, 1)));
+            crate::image::LayerItemBuilder::from_image(img).with_alpha(*alpha as f32)
+        })
+        .collect();
+
+    let size = output_width.zip(output_height);
+
+    let result = crate::image::istack(items, size).map_err(|e| {
+        napi::Error::new(napi::Status::GenericFailure, format!("istack failed: {e}"))
+    })?;
+
+    Ok(result.into_raw())
+}
+
+/// ストレージディレクトリのパスを取得します。
+#[napi]
+pub fn get_storage_dir() -> String {
+    crate::utils::storage::get_storage_dir()
+        .to_string_lossy()
+        .to_string()
+}
+
+/// パッケージのバージョンを取得します。
+#[napi]
+pub fn get_version() -> String {
+    crate::config::VERSION.to_string()
+}
+
+/// パッケージのタイトルを取得します。
+#[napi]
+pub fn get_title() -> String {
+    crate::config::TITLE.to_string()
 }
 
 pub mod detect;

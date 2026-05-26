@@ -1,8 +1,16 @@
 //! 画像操作およびテンソル（ndarray）変換用の共通ユーティリティを提供します。
 
+pub mod encode;
 pub mod error;
+pub mod layer;
+pub mod load;
 
+pub use encode::{rgb_decode, rgb_encode};
 pub use error::ImageError;
+pub use layer::{LayerItemBuilder, istack};
+pub use load::{
+    ImageSource, ImageSourceKind, check_image_source, load_image, load_image_with_background,
+};
 
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
