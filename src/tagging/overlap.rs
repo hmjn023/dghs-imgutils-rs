@@ -2,8 +2,13 @@ use crate::hub::hf_hub_download;
 use std::collections::{HashMap, HashSet};
 
 fn get_overlap_tags() -> HashMap<String, Vec<String>> {
-    let path = hf_hub_download("alea31415/tag_filtering", "overlap_tags_simplified.json", Some("dataset"), None)
-        .expect("Failed to download overlap tags");
+    let path = hf_hub_download(
+        "alea31415/tag_filtering",
+        "overlap_tags_simplified.json",
+        Some("dataset"),
+        None,
+    )
+    .expect("Failed to download overlap tags");
     let content = std::fs::read_to_string(path).expect("Failed to read overlap tags");
     serde_json::from_str(&content).expect("Failed to parse overlap tags JSON")
 }

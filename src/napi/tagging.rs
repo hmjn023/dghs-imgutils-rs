@@ -1,8 +1,8 @@
-use crate::tagging::deepdanbooru::get_deepdanbooru_tags as core_deepdanbooru;
-use crate::tagging::mldanbooru::get_mldanbooru_tags as core_mldanbooru;
-use crate::tagging::deepgelbooru::get_deepgelbooru_tags as core_deepgelbooru;
-use crate::tagging::wd14::get_wd14_tags as core_wd14;
 use crate::tagging::camie::get_camie_tags as core_camie;
+use crate::tagging::deepdanbooru::get_deepdanbooru_tags as core_deepdanbooru;
+use crate::tagging::deepgelbooru::get_deepgelbooru_tags as core_deepgelbooru;
+use crate::tagging::mldanbooru::get_mldanbooru_tags as core_mldanbooru;
+use crate::tagging::wd14::get_wd14_tags as core_wd14;
 use napi_derive::napi;
 use std::collections::HashMap;
 
@@ -25,13 +25,21 @@ pub fn get_deepdanbooru_tags(
     character_threshold: Option<f64>,
     use_real_name: Option<bool>,
 ) -> napi::Result<TagResult> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image: {}", e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
     let gt = general_threshold.unwrap_or(0.5) as f32;
     let ct = character_threshold.unwrap_or(0.5) as f32;
     let ur = use_real_name.unwrap_or(false);
-    let result = core_deepdanbooru(&image, gt, ct, ur)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("DeepDanbooru failed: {}", e)))?;
+    let result = core_deepdanbooru(&image, gt, ct, ur).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("DeepDanbooru failed: {}", e),
+        )
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -49,14 +57,22 @@ pub fn get_mldanbooru_tags(
     keep_ratio: Option<bool>,
     use_real_name: Option<bool>,
 ) -> napi::Result<TagResult> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image: {}", e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
     let th = threshold.unwrap_or(0.7) as f32;
     let sz = size.unwrap_or(448) as u32;
     let kr = keep_ratio.unwrap_or(false);
     let ur = use_real_name.unwrap_or(false);
-    let result = core_mldanbooru(&image, th, sz, kr, ur)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("ML-Danbooru failed: {}", e)))?;
+    let result = core_mldanbooru(&image, th, sz, kr, ur).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("ML-Danbooru failed: {}", e),
+        )
+    })?;
     Ok(TagResult {
         general: vec_to_map(result.general),
         character: vec_to_map(result.character),
@@ -71,12 +87,20 @@ pub fn get_deepgelbooru_tags(
     general_threshold: Option<f64>,
     character_threshold: Option<f64>,
 ) -> napi::Result<TagResult> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image: {}", e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
     let gt = general_threshold.unwrap_or(0.3) as f32;
     let ct = character_threshold.unwrap_or(0.3) as f32;
-    let result = core_deepgelbooru(&image, gt, ct)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("DeepGelbooru failed: {}", e)))?;
+    let result = core_deepgelbooru(&image, gt, ct).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("DeepGelbooru failed: {}", e),
+        )
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -96,16 +120,21 @@ pub fn get_wd14_tags(
     character_mcut_enabled: Option<bool>,
     no_underline: Option<bool>,
 ) -> napi::Result<TagResult> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image: {}", e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
     let model = model_name.unwrap_or_else(|| "SwinV2_v3".to_string());
     let gt = general_threshold.unwrap_or(0.35) as f32;
     let gm = general_mcut_enabled.unwrap_or(false);
     let ct = character_threshold.unwrap_or(0.85) as f32;
     let cm = character_mcut_enabled.unwrap_or(false);
     let nu = no_underline.unwrap_or(false);
-    let result = core_wd14(&image, &model, gt, gm, ct, cm, nu)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e)))?;
+    let result = core_wd14(&image, &model, gt, gm, ct, cm, nu).map_err(|e| {
+        napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e))
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -123,14 +152,19 @@ pub fn get_camie_tags(
     thresholds: Option<HashMap<String, f64>>,
     no_underline: Option<bool>,
 ) -> napi::Result<TagResult> {
-    let image = image::open(&path)
-        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Failed to open image: {}", e)))?;
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
     let model = model_name.unwrap_or_else(|| "initial".to_string());
     let mode_str = mode.unwrap_or_else(|| "balanced".to_string());
     let nu = no_underline.unwrap_or(false);
     let thresh_map = thresholds.map(|m| m.into_iter().map(|(k, v)| (k, v as f32)).collect());
-    let result = core_camie(&image, &model, &mode_str, thresh_map, nu)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e)))?;
+    let result = core_camie(&image, &model, &mode_str, thresh_map, nu).map_err(|e| {
+        napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e))
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),

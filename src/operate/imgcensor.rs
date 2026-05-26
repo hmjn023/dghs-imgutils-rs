@@ -48,12 +48,8 @@ pub fn censor_area_image(
     }
 
     let scale = match fit {
-        CensorImageFit::Contain => {
-            (area_w as f32 / cw as f32).min(area_h as f32 / ch as f32)
-        }
-        CensorImageFit::Cover => {
-            (area_w as f32 / cw as f32).max(area_h as f32 / ch as f32)
-        }
+        CensorImageFit::Contain => (area_w as f32 / cw as f32).min(area_h as f32 / ch as f32),
+        CensorImageFit::Cover => (area_w as f32 / cw as f32).max(area_h as f32 / ch as f32),
     };
 
     let new_w = ((cw as f32 * scale).round() as u32).max(1);
@@ -149,10 +145,7 @@ mod tests {
     fn test_censor_areas_image() {
         let mut img = RgbaImage::from_pixel(100, 100, Rgba([255, 255, 255, 255]));
         let stamp = make_solid_rgba(5, 5, Rgba([0, 0, 255, 255]));
-        let areas = [
-            (0, 0, 10, 10),
-            (50, 50, 60, 60),
-        ];
+        let areas = [(0, 0, 10, 10), (50, 50, 60, 60)];
         censor_areas_image(&mut img, &areas, &stamp, CensorImageFit::Contain);
         assert_eq!(img.get_pixel(3, 3), &Rgba([0, 0, 255, 255]));
         assert_eq!(img.get_pixel(53, 53), &Rgba([0, 0, 255, 255]));

@@ -31,7 +31,10 @@ pub enum CensorMethod {
     /// 単色塗りつぶし。`color` は RGB
     Color { color: [u8; 3] },
     /// 画像（スタンプ・絵文字）オーバーレイ。アルファブレンドで合成
-    Image { image: DynamicImage, fit: CensorImageFit },
+    Image {
+        image: DynamicImage,
+        fit: CensorImageFit,
+    },
 }
 
 impl Default for CensorMethod {
@@ -82,7 +85,10 @@ pub fn censor_area(
                 ImageBuffer::from_pixel(bw, bh, Rgb(*color));
             DynamicImage::ImageRgb8(canvas)
         }
-        CensorMethod::Image { image: censor_img, fit } => {
+        CensorMethod::Image {
+            image: censor_img,
+            fit,
+        } => {
             let mut rgba = img.to_rgba8();
             let area_f32 = [bx1 as f32, by1 as f32, bx2 as f32, by2 as f32];
             crate::operate::imgcensor::censor_area_image(&mut rgba, &area_f32, censor_img, *fit);
@@ -174,9 +180,15 @@ pub fn censor_nsfw_image(
 
     let target_labels: Vec<&str> = {
         let mut labels = Vec::new();
-        if nipple_f { labels.push("nipple_f"); }
-        if penis { labels.push("penis"); }
-        if pussy { labels.push("pussy"); }
+        if nipple_f {
+            labels.push("nipple_f");
+        }
+        if penis {
+            labels.push("penis");
+        }
+        if pussy {
+            labels.push("pussy");
+        }
         labels
     };
 

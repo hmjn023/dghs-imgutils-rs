@@ -477,10 +477,11 @@ pub fn get_title() -> String {
 }
 
 pub mod detect;
+pub mod generic;
 pub mod metrics;
 pub mod ocr;
+pub mod operate;
 pub mod pose;
 pub mod segment;
-pub mod operate;
 pub mod tagging;
 pub mod validate;

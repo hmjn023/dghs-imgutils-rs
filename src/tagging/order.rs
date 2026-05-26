@@ -18,14 +18,18 @@ fn is_count_tag(tag: &str) -> bool {
     }
     let rest = &tag[i..];
     let rest_str = &*rest;
-    rest_str == "boy" || rest_str == "boys" || rest_str == "girl" || rest_str == "girls"
-        || rest_str.starts_with('+') && (rest_str[1..] == *"boy" || rest_str[1..] == *"boys" || rest_str[1..] == *"girl" || rest_str[1..] == *"girls")
+    rest_str == "boy"
+        || rest_str == "boys"
+        || rest_str == "girl"
+        || rest_str == "girls"
+        || rest_str.starts_with('+')
+            && (rest_str[1..] == *"boy"
+                || rest_str[1..] == *"boys"
+                || rest_str[1..] == *"girl"
+                || rest_str[1..] == *"girls")
 }
 
-pub fn sort_tags(
-    tags: &HashMap<String, f32>,
-    mode: &str,
-) -> Vec<String> {
+pub fn sort_tags(tags: &HashMap<String, f32>, mode: &str) -> Vec<String> {
     let mut npeople_tags = Vec::new();
     let mut remaining = Vec::new();
 

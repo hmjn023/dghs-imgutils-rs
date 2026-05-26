@@ -45,6 +45,9 @@ pub mod config;
 /// 汎用ユーティリティ（キャッシュ、ストレージ、エリアバッチラン）。
 pub mod utils;
 
+/// 汎用 ML エンジン（CLIP, SigLIP, YOLO-Seg, TIMM 分類、画像拡張）。
+pub mod generic;
+
 #[cfg(feature = "napi")]
 /// JS/TS ネイティブバインディング (napi-rs) 用の公開インターフェース。
 pub mod napi;
