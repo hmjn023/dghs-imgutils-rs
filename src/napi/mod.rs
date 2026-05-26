@@ -483,6 +483,7 @@ pub mod metrics;
 pub mod ocr;
 pub mod operate;
 pub mod pose;
+pub mod resource_ascii;
 pub mod segment;
 pub mod tagging;
 pub mod validate;
