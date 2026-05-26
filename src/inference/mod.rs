@@ -24,8 +24,48 @@ pub fn init_onnx_runtime() -> Result<(), InferenceError> {
 ///
 /// * `model_path` - ONNX モデルファイルへのパス
 pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, InferenceError> {
-    let session = Session::builder()
-        .map_err(|e| InferenceError::Initialization(e.to_string()))?
+    use ort::ep::ExecutionProvider;
+    use ort::execution_providers::{
+        CUDAExecutionProvider, DirectMLExecutionProvider, OpenVINOExecutionProvider,
+        TensorRTExecutionProvider,
+    };
+
+    let mut builder = Session::builder()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+
+    let mut providers = Vec::new();
+
+    // 1. TensorRT (NVIDIA 高性能 GPU)
+    let trt = TensorRTExecutionProvider::default();
+    if trt.is_available().unwrap_or(false) {
+        providers.push(trt.build());
+    }
+
+    // 2. CUDA (NVIDIA 標準 GPU)
+    let cuda = CUDAExecutionProvider::default();
+    if cuda.is_available().unwrap_or(false) {
+        providers.push(cuda.build());
+    }
+
+    // 3. DirectML (Windows NPU/GPU)
+    let dml = DirectMLExecutionProvider::default();
+    if dml.is_available().unwrap_or(false) {
+        providers.push(dml.build());
+    }
+
+    // 4. OpenVINO (Intel CPU/GPU/NPU)
+    let openvino = OpenVINOExecutionProvider::default();
+    if openvino.is_available().unwrap_or(false) {
+        providers.push(openvino.build());
+    }
+
+    if !providers.is_empty() {
+        builder = builder
+            .with_execution_providers(providers)
+            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    }
+
+    let session = builder
         .commit_from_file(model_path)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     Ok(session)
