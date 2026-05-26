@@ -18,6 +18,12 @@ pub mod tagging;
 /// メトリック評価（類似度、同一判定、クラスタリング）機能。
 pub mod metrics;
 
+/// 物体検出（アニメ顔、頭部、全身、検閲等）機能。
+pub mod detect;
+
+/// 領域分割（キャラクター背景透過、単色背景切り抜き）機能。
+pub mod segment;
+
 #[cfg(feature = "napi")]
 /// JS/TS ネイティブバインディング (napi-rs) 用の公開インターフェース。
 pub mod napi;

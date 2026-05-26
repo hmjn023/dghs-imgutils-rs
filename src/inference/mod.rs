@@ -1,8 +1,13 @@
 //! ONNX Runtime 推論セッションの作成と、単一入力・単一出力の推論実行を共通化する共通ユーティリティを提供します。
 
 pub mod error;
+pub mod yolo;
 
 pub use error::InferenceError;
+pub use yolo::{
+    DetectionResult, preprocess_image_yolo, xy_postprocess, yolo_nms, yolo_xywh2xyxy,
+    postprocess_nms_yolo, postprocess_end2end_yolo, yolo_predict,
+};
 
 use ort::session::Session;
 use std::path::Path;
