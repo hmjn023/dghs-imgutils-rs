@@ -27,6 +27,9 @@ pub mod segment;
 /// エッジ検出（Canny / Lineart / LineartAnime）機能。
 pub mod edge;
 
+/// 姿勢推定（DWpose / OpenPose 18 キーポイント検出）機能。
+pub mod pose;
+
 /// 画像検証（破損チェック・グレースケール・AI生成・NSFW 等）機能。
 pub mod validate;
 

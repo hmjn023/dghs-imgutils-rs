@@ -413,4 +413,12 @@ pub static ALL_MODELS: &[ModelEntry] = &[
         "overlap_tags_simplified.json",
         "重複タグ定義",
     ),
+    // ==========================================
+    // pose/dwpose.py  ─ DWpose 姿勢推定 (RTMPose-x)
+    // ==========================================
+    ModelEntry::model(
+        "yzd-v/DWPose",
+        "dw-ll_ucoco_384.onnx",
+        "DWpose: RTMPose-x キーポイント推定モデル (384x288)",
+    ),
 ];
