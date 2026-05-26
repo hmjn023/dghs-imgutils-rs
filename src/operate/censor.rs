@@ -126,9 +126,15 @@ pub fn censor_nsfw(
 
     let target_labels: Vec<&str> = {
         let mut labels = Vec::new();
-        if nipple_f { labels.push("nipple_f"); }
-        if penis { labels.push("penis"); }
-        if pussy { labels.push("pussy"); }
+        if nipple_f {
+            labels.push("nipple_f");
+        }
+        if penis {
+            labels.push("penis");
+        }
+        if pussy {
+            labels.push("pussy");
+        }
         labels
     };
 

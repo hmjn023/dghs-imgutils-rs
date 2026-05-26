@@ -2,7 +2,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, InferenceError};
+use crate::inference::{InferenceError, create_onnx_session};
 use image::DynamicImage;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
@@ -44,7 +44,12 @@ pub fn preprocess_isnetis(
     // scale x scale の黒背景キャンバスを作成
     let mut canvas = image::ImageBuffer::from_pixel(scale, scale, image::Rgb([0, 0, 0]));
     // リサイズした画像をパディング位置に貼り付け
-    image::imageops::overlay(&mut canvas, &resized.to_rgb8(), pad_left as i64, pad_top as i64);
+    image::imageops::overlay(
+        &mut canvas,
+        &resized.to_rgb8(),
+        pad_left as i64,
+        pad_top as i64,
+    );
 
     // [1, 3, scale, scale] テンソルへ変換 (ピクセル値 / 255.0)
     let tensor = to_ndarray_chw(
@@ -62,7 +67,9 @@ pub fn get_isnetis_mask(
     image: &DynamicImage,
     scale: u32,
 ) -> Result<ndarray::Array2<f32>, InferenceError> {
-    let mut lock = ISNETIS_SESSION.lock().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut lock = ISNETIS_SESSION
+        .lock()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     if lock.is_none() {
         let path = hf_hub_download("skytnt/anime-seg", "isnetis.onnx", None, None)
             .map_err(|e| InferenceError::Initialization(e.to_string()))?;
@@ -93,14 +100,18 @@ pub fn get_isnetis_mask(
     // 3. パディング部分をスライスで切り出し (リサイズ用に u8 2値化マスクとして作成)
     let mut sliced_mask_u8 = image::ImageBuffer::new(w, h);
     let view_shape = output_view_arr.shape();
-    
+
     for y in 0..h {
         for x in 0..w {
             let val = match view_shape.len() {
                 4 => output_view_arr[&[0, 0, (y + pad_top) as usize, (x + pad_left) as usize][..]],
                 3 => output_view_arr[&[0, (y + pad_top) as usize, (x + pad_left) as usize][..]],
                 2 => output_view_arr[&[(y + pad_top) as usize, (x + pad_left) as usize][..]],
-                _ => return Err(InferenceError::InvalidShape("Unexpected ISNetIS output shape".to_string())),
+                _ => {
+                    return Err(InferenceError::InvalidShape(
+                        "Unexpected ISNetIS output shape".to_string(),
+                    ));
+                }
             };
             let pixel_val = (val.clamp(0.0, 1.0) * 255.0).round() as u8;
             sliced_mask_u8.put_pixel(x, y, image::Luma([pixel_val]));
@@ -109,14 +120,19 @@ pub fn get_isnetis_mask(
 
     // 4. マスクを元の画像サイズ (old_w, old_h) に戻す
     let mask_img = image::DynamicImage::ImageLuma8(sliced_mask_u8);
-    
-    let resized_mask = mask_img.resize_exact(old_size.0, old_size.1, image::imageops::FilterType::Triangle);
+
+    let resized_mask = mask_img.resize_exact(
+        old_size.0,
+        old_size.1,
+        image::imageops::FilterType::Triangle,
+    );
     let resized_mask_luma = resized_mask.to_luma8();
 
     let mut final_mask = ndarray::Array2::<f32>::zeros((old_size.1 as usize, old_size.0 as usize));
     for y in 0..old_size.1 {
         for x in 0..old_size.0 {
-            final_mask[[y as usize, x as usize]] = resized_mask_luma.get_pixel(x, y)[0] as f32 / 255.0;
+            final_mask[[y as usize, x as usize]] =
+                resized_mask_luma.get_pixel(x, y)[0] as f32 / 255.0;
         }
     }
 
@@ -143,9 +159,12 @@ pub fn segment_with_isnetis(
             let pixel = rgb_img.get_pixel(x, y);
 
             // アルファスタック背景ブレンド：前景 * alpha + 背景 * (1 - alpha)
-            let r = ((pixel[0] as f32 * m_val) + (bg_color[0] as f32 * (1.0 - m_val))).round() as u8;
-            let g = ((pixel[1] as f32 * m_val) + (bg_color[1] as f32 * (1.0 - m_val))).round() as u8;
-            let b = ((pixel[2] as f32 * m_val) + (bg_color[2] as f32 * (1.0 - m_val))).round() as u8;
+            let r =
+                ((pixel[0] as f32 * m_val) + (bg_color[0] as f32 * (1.0 - m_val))).round() as u8;
+            let g =
+                ((pixel[1] as f32 * m_val) + (bg_color[1] as f32 * (1.0 - m_val))).round() as u8;
+            let b =
+                ((pixel[2] as f32 * m_val) + (bg_color[2] as f32 * (1.0 - m_val))).round() as u8;
 
             canvas.put_pixel(x, y, image::Rgb([r, g, b]));
         }

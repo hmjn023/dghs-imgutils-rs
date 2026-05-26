@@ -7,10 +7,7 @@ use napi_derive::napi;
 
 /// ISNetIS 前景セグメンテーション結果のマスク値を 2次元配列（f64）で返します。
 #[napi]
-pub fn get_isnetis_mask(
-    path: String,
-    scale: Option<i32>,
-) -> napi::Result<Vec<Vec<f64>>> {
+pub fn get_isnetis_mask(path: String, scale: Option<i32>) -> napi::Result<Vec<Vec<f64>>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -77,12 +74,14 @@ pub fn segment_with_isnetis(
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());
-    segmented_img.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to encode segmented image: {}", e),
-        )
-    })?;
+    segmented_img
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode segmented image: {}", e),
+            )
+        })?;
 
     Ok(buf.into_inner())
 }
@@ -92,10 +91,7 @@ pub fn segment_with_isnetis(
 /// * `path`: 元画像のファイルパス
 /// * `scale`: 推論時のサイズ（オプション）
 #[napi]
-pub fn segment_rgba_with_isnetis(
-    path: String,
-    scale: Option<i32>,
-) -> napi::Result<Vec<u8>> {
+pub fn segment_rgba_with_isnetis(path: String, scale: Option<i32>) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -113,12 +109,14 @@ pub fn segment_rgba_with_isnetis(
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());
-    segmented_img.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to encode RGBA segmented image: {}", e),
-        )
-    })?;
+    segmented_img
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode RGBA segmented image: {}", e),
+            )
+        })?;
 
     Ok(buf.into_inner())
 }

@@ -1,13 +1,13 @@
 //! ONNX Runtime 推論セッションの作成と、単一入力・単一出力の推論実行を共通化する共通ユーティリティを提供します。
 
+pub mod classify;
 pub mod error;
 pub mod yolo;
-pub mod classify;
 
 pub use error::InferenceError;
 pub use yolo::{
-    DetectionResult, preprocess_image_yolo, xy_postprocess, yolo_nms, yolo_xywh2xyxy,
-    postprocess_nms_yolo, postprocess_end2end_yolo, yolo_predict,
+    DetectionResult, postprocess_end2end_yolo, postprocess_nms_yolo, preprocess_image_yolo,
+    xy_postprocess, yolo_nms, yolo_predict, yolo_xywh2xyxy,
 };
 
 use ort::session::Session;
@@ -36,8 +36,8 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
         TensorRTExecutionProvider,
     };
 
-    let mut builder = Session::builder()
-        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut builder =
+        Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
 
     let mut providers = Vec::new();
 

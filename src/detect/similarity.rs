@@ -19,10 +19,7 @@ pub fn calculate_iou(box1: &BBox, box2: &BBox) -> f32 {
 
 /// 二つの境界ボックス配列の間の類似度リストを計算します。
 /// Kuhn-Munkres アルゴリズムによる最適ペアリングを行います。
-pub fn bboxes_similarity(
-    bboxes1: &[BBox],
-    bboxes2: &[BBox],
-) -> Vec<f32> {
+pub fn bboxes_similarity(bboxes1: &[BBox], bboxes2: &[BBox]) -> Vec<f32> {
     let m = bboxes1.len();
     let n = bboxes2.len();
 
@@ -77,10 +74,7 @@ pub fn bboxes_similarity(
 }
 
 /// 検出結果リストの間の類似度リストを計算します（クラスラベルごとにマッチングを制限）。
-pub fn detection_similarity(
-    detect1: &[Detection],
-    detect2: &[Detection],
-) -> Vec<f32> {
+pub fn detection_similarity(detect1: &[Detection], detect2: &[Detection]) -> Vec<f32> {
     use std::collections::HashSet;
 
     // 両方の検出結果からユニークなラベルを収集
