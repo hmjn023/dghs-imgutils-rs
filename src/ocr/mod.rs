@@ -21,6 +21,9 @@ pub enum OcrError {
     #[error("Character dictionary error: {0}")]
     CharDict(String),
 
+    #[error("ORT error: {0}")]
+    Ort(#[from] ort::Error),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

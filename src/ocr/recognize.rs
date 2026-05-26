@@ -80,7 +80,7 @@ fn recognize_text(region: &DynamicImage) -> Result<String, OcrError> {
 
     let chars = load_char_dict()?;
 
-    let text = ctc_decode(&shape_usize, slice, chars)?;
+    let text = ctc_decode(&shape_usize, slice, &chars)?;
 
     Ok(text)
 }

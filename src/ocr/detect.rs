@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use image::{DynamicImage, GrayImage, ImageBuffer, Luma};
+use image::{DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma};
 use imageproc::contours::{BorderType, find_contours};
 use ndarray::{Array2, Array4};
 use once_cell::sync::Lazy;
