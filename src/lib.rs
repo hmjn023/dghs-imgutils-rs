@@ -24,6 +24,15 @@ pub mod detect;
 /// 領域分割（キャラクター背景透過、単色背景切り抜き）機能。
 pub mod segment;
 
+/// エッジ検出（Canny / Lineart / LineartAnime）機能。
+pub mod edge;
+
+/// 画像検証（破損チェック・グレースケール・AI生成・NSFW 等）機能。
+pub mod validate;
+
+/// 画像操作（リサイズ・自動トリミング・自動検閲）機能。
+pub mod operate;
+
 #[cfg(feature = "napi")]
 /// JS/TS ネイティブバインディング (napi-rs) 用の公開インターフェース。
 pub mod napi;

@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod yolo;
+pub mod classify;
 
 pub use error::InferenceError;
 pub use yolo::{
