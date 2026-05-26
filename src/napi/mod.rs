@@ -93,7 +93,6 @@ pub fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Res
 }
 
 /// 2つの CCIP 特徴ベクトルのペア距離（違い度）を算出します。
-/// 距離が近いほど、同じキャラクターである確率が高くなります。
 ///
 /// * `emb1`: 1つ目の768次元特徴ベクトル
 /// * `emb2`: 2つ目の768次元特徴ベクトル
@@ -206,7 +205,6 @@ pub fn ccip_batch_same(
         )
     })?;
 
-    // ndarray::Array2<bool> -> Vec<Vec<bool>> の変換
     let mut result = Vec::with_capacity(matrix.nrows());
     for r in 0..matrix.nrows() {
         result.push(matrix.row(r).to_vec());
@@ -260,8 +258,6 @@ pub fn ccip_merge(embeddings: Vec<Vec<f64>>) -> napi::Result<Vec<f64>> {
 /// * `eps`: 近傍範囲の半径（オプション。省略時はモデルの最適デフォルト値がロードされます）
 /// * `min_samples`: クラスタを形成するために必要な最小データ数（オプション）
 /// * `model_name`: 使用するモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
-///
-/// 戻り値は、各入力に対する所属クラスタID配列です（ノイズデータは `-1`）。
 #[napi]
 pub fn ccip_cluster(
     embeddings: Vec<Vec<f64>>,
@@ -293,7 +289,6 @@ pub fn ccip_cluster(
     let core_eps = eps.map(|v| v as f32);
     let core_min_samples = min_samples.map(|v| v.max(0) as usize);
 
-    // method は dbscan
     let clusters = core_ccip_clustering(&core_embs, "dbscan", core_eps, core_min_samples, model)
         .map_err(|e| {
             napi::Error::new(
@@ -309,3 +304,4 @@ pub mod detect;
 pub mod metrics;
 pub mod segment;
 pub mod tagging;
+pub mod validate;
