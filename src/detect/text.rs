@@ -3,14 +3,15 @@
 
 use crate::detect::base::Detection;
 use crate::hub::hf_hub_download;
-use crate::inference::{create_onnx_session, InferenceError};
+use crate::inference::{InferenceError, create_onnx_session};
 use image::{DynamicImage, GrayImage, ImageBuffer, Luma};
 use ndarray::{Array2, Array4};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-static TEXT_SESSION_CACHE: Lazy<Mutex<HashMap<String, ort::session::Session>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static TEXT_SESSION_CACHE: Lazy<Mutex<HashMap<String, ort::session::Session>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// テキスト検出用のヒートマップ正規化
 fn normalize_text_input(
@@ -80,14 +81,24 @@ pub fn detect_text(
 
     // 2. 幅と高さを 32 の倍数に切り上げパディング
     let align = 32u32;
-    let padded_w = if orig_w % align != 0 { orig_w + (align - orig_w % align) } else { orig_w };
-    let padded_h = if orig_h % align != 0 { orig_h + (align - orig_h % align) } else { orig_h };
+    let padded_w = if orig_w % align != 0 {
+        orig_w + (align - orig_w % align)
+    } else {
+        orig_w
+    };
+    let padded_h = if orig_h % align != 0 {
+        orig_h + (align - orig_h % align)
+    } else {
+        orig_h
+    };
 
     // 3. 前処理
     let input_tensor = normalize_text_input(&resized_image, padded_w, padded_h, orig_w, orig_h);
 
     // 4. ONNX 推論の実行
-    let mut cache = TEXT_SESSION_CACHE.lock().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let mut cache = TEXT_SESSION_CACHE
+        .lock()
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     if !cache.contains_key(model) {
         let model_filename = format!("{}/end2end.onnx", model);
         let path = hf_hub_download("deepghs/text_detection", &model_filename, None, None)
@@ -99,10 +110,12 @@ pub fn detect_text(
 
     let inputs = ort::inputs!["input" => ort::value::Tensor::from_array(input_tensor)?];
     let outputs = session.run(inputs)?;
-    let output = outputs.get("output")
+    let output = outputs
+        .get("output")
         .ok_or_else(|| InferenceError::InvalidShape("Missing output from DBNet++".to_string()))?;
 
-    let (shape, slice) = output.try_extract_tensor::<f32>()
+    let (shape, slice) = output
+        .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let shape_usize: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
     let output_view = ndarray::ArrayView::from_shape(shape_usize, slice)
@@ -119,7 +132,11 @@ pub fn detect_text(
             let val = match view_shape.len() {
                 4 => output_view[[0, 0, y, x]],
                 3 => output_view[[0, y, x]],
-                _ => return Err(InferenceError::InvalidShape("Unexpected DBNet++ output dimensions".to_string())),
+                _ => {
+                    return Err(InferenceError::InvalidShape(
+                        "Unexpected DBNet++ output dimensions".to_string(),
+                    ));
+                }
             };
             heatmap[[y, x]] = val;
         }
@@ -207,7 +224,11 @@ pub fn detect_text(
     }
 
     // スコア降順でソート
-    detections.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    detections.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(detections)
 }

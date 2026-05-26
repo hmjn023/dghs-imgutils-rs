@@ -43,10 +43,10 @@ fn ensure_nsfw_model(model_name: &str) -> Result<(), InferenceError> {
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let session = create_onnx_session(&model_path)?;
 
-    NSFW_CACHE.lock().unwrap().insert(
-        model_name.to_string(),
-        NsfwModel { session, size },
-    );
+    NSFW_CACHE
+        .lock()
+        .unwrap()
+        .insert(model_name.to_string(), NsfwModel { session, size });
     Ok(())
 }
 

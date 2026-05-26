@@ -12,8 +12,7 @@ use crate::detect::head::detect_heads as core_detect_heads;
 use crate::detect::nudenet::detect_with_nudenet as core_detect_with_nudenet;
 use crate::detect::person::detect_person as core_detect_person;
 use crate::detect::similarity::{
-    bboxes_similarity as core_bboxes_similarity,
-    detection_similarity as core_detection_similarity,
+    bboxes_similarity as core_bboxes_similarity, detection_similarity as core_detection_similarity,
 };
 use crate::detect::text::detect_text as core_detect_text;
 use crate::detect::visual::detection_visualize as core_detection_visualize;
@@ -387,10 +386,7 @@ pub fn detect_hands(
 
 /// 二つの境界ボックスリストの間のペア IoU 類似度を計算します。
 #[napi]
-pub fn bboxes_similarity(
-    boxes1: Vec<NapiBBox>,
-    boxes2: Vec<NapiBBox>,
-) -> napi::Result<Vec<f64>> {
+pub fn bboxes_similarity(boxes1: Vec<NapiBBox>, boxes2: Vec<NapiBBox>) -> napi::Result<Vec<f64>> {
     let core_boxes1: Vec<CoreBBox> = boxes1.into_iter().map(CoreBBox::from).collect();
     let core_boxes2: Vec<CoreBBox> = boxes2.into_iter().map(CoreBBox::from).collect();
 
@@ -429,22 +425,33 @@ pub fn detection_visualize(
         )
     })?;
 
-    let core_detections: Vec<CoreDetection> = detections.into_iter().map(CoreDetection::from).collect();
+    let core_detections: Vec<CoreDetection> =
+        detections.into_iter().map(CoreDetection::from).collect();
     let padding = text_padding.unwrap_or(6) as u32;
     let size = fontsize.unwrap_or(12.0) as f32;
     let limit = max_short_edge_size.map(|v| v.max(0) as u32);
     let alpha = mask_alpha.unwrap_or(0.5) as f32;
     let no_lbl = no_label.unwrap_or(false);
 
-    let visual_img = core_detection_visualize(&image, &core_detections, padding, size, limit, alpha, no_lbl);
+    let visual_img = core_detection_visualize(
+        &image,
+        &core_detections,
+        padding,
+        size,
+        limit,
+        alpha,
+        no_lbl,
+    );
 
     let mut buf = std::io::Cursor::new(Vec::new());
-    visual_img.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to encode visualized image: {}", e),
-        )
-    })?;
+    visual_img
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode visualized image: {}", e),
+            )
+        })?;
 
     Ok(buf.into_inner())
 }

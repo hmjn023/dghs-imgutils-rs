@@ -13,8 +13,8 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
 use crate::inference::{InferenceError, create_onnx_session};
-use image::imageops::FilterType;
 use image::DynamicImage;
+use image::imageops::FilterType;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
 use ort::session::Session;
@@ -41,10 +41,7 @@ static CLASSIFY_CACHE: Lazy<Mutex<HashMap<String, ClassifyEntry>>> =
 
 /// 指定した `(repo_id, model_name)` の ClassifyModel を取得します。
 /// キャッシュ済みならキャッシュから返します。
-fn ensure_classify_model(
-    repo_id: &str,
-    model_name: &str,
-) -> Result<(), InferenceError> {
+fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), InferenceError> {
     let key = format!("{}/{}", repo_id, model_name);
     {
         let cache = CLASSIFY_CACHE.lock().unwrap();
@@ -54,22 +51,12 @@ fn ensure_classify_model(
     }
 
     // model.onnx をダウンロード
-    let model_path = hf_hub_download(
-        repo_id,
-        &format!("{}/model.onnx", model_name),
-        None,
-        None,
-    )
-    .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let model_path = hf_hub_download(repo_id, &format!("{}/model.onnx", model_name), None, None)
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
 
     // meta.json をダウンロード
-    let meta_path = hf_hub_download(
-        repo_id,
-        &format!("{}/meta.json", model_name),
-        None,
-        None,
-    )
-    .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    let meta_path = hf_hub_download(repo_id, &format!("{}/meta.json", model_name), None, None)
+        .map_err(|e| InferenceError::Initialization(e.to_string()))?;
 
     let meta_str = std::fs::read_to_string(&meta_path)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
@@ -122,9 +109,9 @@ pub fn classify_predict(
         .ok_or_else(|| InferenceError::Initialization("Model not found in cache".to_string()))?;
 
     let tensor = preprocess_classify(image, entry.input_w, entry.input_h)?;
-    let outputs = entry.session.run(
-        ort::inputs!["input" => ort::value::Tensor::from_array(tensor.clone())?]
-    )?;
+    let outputs = entry
+        .session
+        .run(ort::inputs!["input" => ort::value::Tensor::from_array(tensor.clone())?])?;
 
     let (_, output_slice) = outputs["output"]
         .try_extract_tensor::<f32>()

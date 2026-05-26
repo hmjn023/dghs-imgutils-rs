@@ -7,6 +7,6 @@ pub mod canny;
 pub mod lineart;
 pub mod lineart_anime;
 
-pub use canny::{get_edge_by_canny, edge_image_with_canny};
-pub use lineart::{get_edge_by_lineart, edge_image_with_lineart};
-pub use lineart_anime::{get_edge_by_lineart_anime, edge_image_with_lineart_anime};
+pub use canny::{edge_image_with_canny, get_edge_by_canny};
+pub use lineart::{edge_image_with_lineart, get_edge_by_lineart};
+pub use lineart_anime::{edge_image_with_lineart_anime, get_edge_by_lineart_anime};

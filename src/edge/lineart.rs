@@ -46,7 +46,11 @@ pub(crate) fn resize_image_align(img: &DynamicImage, resolution: u32, align: u32
 
     // Python の cv2_resize: 拡大なら LANCZOS4、縮小なら AREA
     let scale = (new_w as f32 / w as f32).max(new_h as f32 / h as f32);
-    let filter = if scale > 1.0 { FilterType::Lanczos3 } else { FilterType::CatmullRom };
+    let filter = if scale > 1.0 {
+        FilterType::Lanczos3
+    } else {
+        FilterType::CatmullRom
+    };
     img.resize_exact(new_w, new_h, filter)
 }
 
@@ -64,9 +68,12 @@ fn load_lineart_session(coarse: bool) -> Result<(), EdgeError> {
     };
     let model_path = hf_hub_download("deepghs/imgutils-models", filename, None, None)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let session = create_onnx_session(&model_path)
-        .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    LINEART_CACHE.lock().unwrap().insert(key.to_string(), session);
+    let session =
+        create_onnx_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
+    LINEART_CACHE
+        .lock()
+        .unwrap()
+        .insert(key.to_string(), session);
     Ok(())
 }
 
@@ -98,8 +105,8 @@ pub fn get_edge_by_lineart(
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let inputs = ort::inputs!["input" => tensor_val]
-        .map_err(|e| EdgeError::Processing(e.to_string()))?;
+    let inputs =
+        ort::inputs!["input" => tensor_val].map_err(|e| EdgeError::Processing(e.to_string()))?;
     let outputs = session
         .run(inputs)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
@@ -117,7 +124,11 @@ pub fn get_edge_by_lineart(
     // 元サイズにリサイズ（Python の cv2_resize 相当）
     let mask_img = mask_to_image(&single_ch, rw, rh);
     let scale = (orig_w as f32 / rw as f32).max(orig_h as f32 / rh as f32);
-    let filter = if scale > 1.0 { FilterType::Lanczos3 } else { FilterType::CatmullRom };
+    let filter = if scale > 1.0 {
+        FilterType::Lanczos3
+    } else {
+        FilterType::CatmullRom
+    };
     let mask_resized = DynamicImage::ImageRgb8(mask_img).resize_exact(orig_w, orig_h, filter);
     let mask_rgb = mask_resized.to_rgb8();
 
@@ -193,8 +204,7 @@ pub(crate) fn blend_edge_mask(
     backcolor: [u8; 3],
     forecolor: Option<[u8; 3]>,
 ) -> DynamicImage {
-    let mut canvas: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_pixel(w, h, Rgb(backcolor));
+    let mut canvas: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_pixel(w, h, Rgb(backcolor));
     for y in 0..h {
         for x in 0..w {
             let edge_val = mask[y as usize][x as usize].clamp(0.0, 1.0);
