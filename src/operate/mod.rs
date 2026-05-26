@@ -11,6 +11,8 @@ pub mod imgcensor;
 pub mod squeeze;
 
 pub use align::align_maxsize;
-pub use censor::{CensorError, CensorMethod, censor_area, censor_areas, censor_nsfw, censor_nsfw_image};
+pub use censor::{
+    CensorError, CensorMethod, censor_area, censor_areas, censor_nsfw, censor_nsfw_image,
+};
 pub use imgcensor::{CensorImageFit, censor_area_image, censor_areas_image};
 pub use squeeze::{squeeze, squeeze_with_transparency};

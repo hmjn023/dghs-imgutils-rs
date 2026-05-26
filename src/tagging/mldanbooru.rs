@@ -35,8 +35,18 @@ pub fn get_mldanbooru_tags(
     keep_ratio: bool,
     use_real_name: bool,
 ) -> Result<TagResult, TaggingError> {
-    let model_path = hf_hub_download("deepghs/ml-danbooru-onnx", "ml_caformer_m36_dec-5-97527.onnx", None, None)?;
-    let tags_path = hf_hub_download("deepghs/imgutils-models", "mldanbooru/mldanbooru_tags.csv", None, None)?;
+    let model_path = hf_hub_download(
+        "deepghs/ml-danbooru-onnx",
+        "ml_caformer_m36_dec-5-97527.onnx",
+        None,
+        None,
+    )?;
+    let tags_path = hf_hub_download(
+        "deepghs/imgutils-models",
+        "mldanbooru/mldanbooru_tags.csv",
+        None,
+        None,
+    )?;
 
     let rgb = force_image_background(image, [255, 255, 255]);
     let resized = resize_align(&rgb, size, keep_ratio, 4);

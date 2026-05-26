@@ -23,6 +23,8 @@ lru = "0.12"
 ureq = "2"
 base64 = "0.22"
 url = "2"
+tar = "0.4"
+rand = "0.8"
 napi = { version = "2.16.11", features = ["async", "serde-json", "napi4"], optional = true }
 napi-derive = { version = "2.16.9", optional = true }
 

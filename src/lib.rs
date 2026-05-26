@@ -42,6 +42,12 @@ pub mod config;
 /// 汎用ユーティリティ（キャッシュ、ストレージ、エリアバッチラン）。
 pub mod utils;
 
+/// リソース管理（背景画像、データセットファイル等）。
+pub mod resource;
+
+/// アスキーアート生成機能。
+pub mod ascii;
+
 #[cfg(feature = "napi")]
 /// JS/TS ネイティブバインディング (napi-rs) 用の公開インターフェース。
 pub mod napi;
