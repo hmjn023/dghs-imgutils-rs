@@ -98,8 +98,7 @@ pub fn get_edge_by_lineart(
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let inputs = ort::inputs!["input" => tensor_val]
-        .map_err(|e| EdgeError::Processing(e.to_string()))?;
+    let inputs = ort::inputs!["input" => tensor_val];
     let outputs = session
         .run(inputs)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
