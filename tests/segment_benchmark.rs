@@ -26,7 +26,11 @@ fn run_segment_precision_test(test_image_rel_path: &str) {
     let mut image_path = PathBuf::from(manifest_dir);
     image_path.push(test_image_rel_path);
 
-    assert!(image_path.exists(), "Test image not found: {:?}", image_path);
+    assert!(
+        image_path.exists(),
+        "Test image not found: {:?}",
+        image_path
+    );
 
     println!("\n📸 領域分割検証 画像: {}", test_image_rel_path);
     println!("------------------------------------------------------------");
@@ -60,14 +64,20 @@ fn run_segment_precision_test(test_image_rel_path: &str) {
         "Python segment failed: {:?}",
         py_output.error
     );
-    println!("✓ Python 版前景マスク抽出完了 (所要時間: {:?})", py_duration);
+    println!(
+        "✓ Python 版前景マスク抽出完了 (所要時間: {:?})",
+        py_duration
+    );
 
     // 2. Rust 側の推論実行 ( get_isnetis_mask )
     let image = image::open(&image_path).expect("Failed to open test image in Rust");
     let rust_start = Instant::now();
     let rust_mask = get_isnetis_mask(&image, 1024).expect("Rust get_isnetis_mask failed");
     let rust_duration = rust_start.elapsed();
-    println!("✓ Rust 版前景マスク抽出完了   (所要時間: {:?})", rust_duration);
+    println!(
+        "✓ Rust 版前景マスク抽出完了   (所要時間: {:?})",
+        rust_duration
+    );
 
     let h = rust_mask.shape()[0];
     let w = rust_mask.shape()[1];
@@ -78,14 +88,8 @@ fn run_segment_precision_test(test_image_rel_path: &str) {
         vec![h as i32, w as i32]
     );
 
-    assert_eq!(
-        py_output.stats.shape[0] as usize, h,
-        "Mask height mismatch"
-    );
-    assert_eq!(
-        py_output.stats.shape[1] as usize, w,
-        "Mask width mismatch"
-    );
+    assert_eq!(py_output.stats.shape[0] as usize, h, "Mask height mismatch");
+    assert_eq!(py_output.stats.shape[1] as usize, w, "Mask width mismatch");
 
     // 3. グリッドダウンサンプリングによる精密ピクセル比較
     let grid_step = py_output.grid_step;
@@ -130,7 +134,10 @@ fn run_segment_precision_test(test_image_rel_path: &str) {
 
     println!("  グリッド比較点数             : {} 点", grid_points_count);
     println!("  グリッド平均絶対誤差 (MAE)   : {:.8}", grid_mae);
-    println!("  全体マスク平均値 - Python    : {:.8}", py_output.stats.mean);
+    println!(
+        "  全体マスク平均値 - Python    : {:.8}",
+        py_output.stats.mean
+    );
     println!("  全体マスク平均値 - Rust      : {:.8}", rust_mean);
     println!("  全体平均値の差               : {:.8}", mean_diff);
 

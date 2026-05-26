@@ -80,7 +80,11 @@ pub fn detection_visualize(
 
     // スコアの昇順にソート（スコアが高いアイテムが前面に描画されるようにする）
     let mut sorted_detections = detections.to_vec();
-    sorted_detections.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_detections.sort_by(|a, b| {
+        a.score
+            .partial_cmp(&b.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     for detect_item in &sorted_detections {
         let (x0_orig, y0_orig, x1_orig, y1_orig) = detect_item.bbox;
@@ -106,22 +110,26 @@ pub fn detection_visualize(
                 }
             }
             let mask_img = image::DynamicImage::ImageLuma8(mask_u8);
-            let resized_mask = mask_img.resize_exact(new_width, new_height, image::imageops::FilterType::Triangle);
+            let resized_mask =
+                mask_img.resize_exact(new_width, new_height, image::imageops::FilterType::Triangle);
             let resized_mask_luma = resized_mask.to_luma8();
 
-                // 画素ループでアルファ重ね合わせ
-                for y in 0..new_height {
-                    for x in 0..new_width {
-                        let m_val = resized_mask_luma.get_pixel(x, y)[0] as f32 / 255.0;
-                        if m_val > 0.0 {
-                            let pixel = visual_image.get_pixel_mut(x, y);
-                            let alpha = m_val * mask_alpha;
-                            pixel[0] = ((color[0] as f32 * alpha) + (pixel[0] as f32 * (1.0 - alpha))) as u8;
-                            pixel[1] = ((color[1] as f32 * alpha) + (pixel[1] as f32 * (1.0 - alpha))) as u8;
-                            pixel[2] = ((color[2] as f32 * alpha) + (pixel[2] as f32 * (1.0 - alpha))) as u8;
-                        }
+            // 画素ループでアルファ重ね合わせ
+            for y in 0..new_height {
+                for x in 0..new_width {
+                    let m_val = resized_mask_luma.get_pixel(x, y)[0] as f32 / 255.0;
+                    if m_val > 0.0 {
+                        let pixel = visual_image.get_pixel_mut(x, y);
+                        let alpha = m_val * mask_alpha;
+                        pixel[0] =
+                            ((color[0] as f32 * alpha) + (pixel[0] as f32 * (1.0 - alpha))) as u8;
+                        pixel[1] =
+                            ((color[1] as f32 * alpha) + (pixel[1] as f32 * (1.0 - alpha))) as u8;
+                        pixel[2] =
+                            ((color[2] as f32 * alpha) + (pixel[2] as f32 * (1.0 - alpha))) as u8;
                     }
                 }
+            }
         }
 
         // 2. 境界ボックス (BBox) 枠線の描画
@@ -140,7 +148,8 @@ pub fn detection_visualize(
         // 3. テキストラベルと信頼度スコアの描画
         if !no_label {
             if let Some(ref font) = system_font {
-                let label_text = format!("{}: {:.2}%", detect_item.label, detect_item.score * 100.0);
+                let label_text =
+                    format!("{}: {:.2}%", detect_item.label, detect_item.score * 100.0);
                 let scale = ab_glyph::PxScale::from(fontsize);
 
                 // テキストの幅・高さを大雑把に計算 (ポータブルな文字幅近似)
@@ -161,9 +170,15 @@ pub fn detection_visualize(
                         let py = box_y + y_offset;
                         if px < new_width && py < new_height {
                             let pixel = visual_image.get_pixel_mut(px, py);
-                            pixel[0] = ((color[0] as f32 * alpha) + (pixel[0] as f32 * (1.0 - alpha))) as u8;
-                            pixel[1] = ((color[1] as f32 * alpha) + (pixel[1] as f32 * (1.0 - alpha))) as u8;
-                            pixel[2] = ((color[2] as f32 * alpha) + (pixel[2] as f32 * (1.0 - alpha))) as u8;
+                            pixel[0] = ((color[0] as f32 * alpha)
+                                + (pixel[0] as f32 * (1.0 - alpha)))
+                                as u8;
+                            pixel[1] = ((color[1] as f32 * alpha)
+                                + (pixel[1] as f32 * (1.0 - alpha)))
+                                as u8;
+                            pixel[2] = ((color[2] as f32 * alpha)
+                                + (pixel[2] as f32 * (1.0 - alpha)))
+                                as u8;
                         }
                     }
                 }

@@ -19,18 +19,21 @@ use once_cell::sync::Lazy;
 use ort::session::Session;
 use std::sync::Mutex;
 
-static LINEART_ANIME_SESSION: Lazy<Mutex<Option<Session>>> =
-    Lazy::new(|| Mutex::new(None));
+static LINEART_ANIME_SESSION: Lazy<Mutex<Option<Session>>> = Lazy::new(|| Mutex::new(None));
 
 fn load_lineart_anime_session() -> Result<(), EdgeError> {
     if LINEART_ANIME_SESSION.lock().unwrap().is_some() {
         return Ok(());
     }
-    let model_path =
-        hf_hub_download("deepghs/imgutils-models", "lineart/lineart_anime.onnx", None, None)
-            .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let session = create_onnx_session(&model_path)
-        .map_err(|e| EdgeError::Processing(e.to_string()))?;
+    let model_path = hf_hub_download(
+        "deepghs/imgutils-models",
+        "lineart/lineart_anime.onnx",
+        None,
+        None,
+    )
+    .map_err(|e| EdgeError::Processing(e.to_string()))?;
+    let session =
+        create_onnx_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
     *LINEART_ANIME_SESSION.lock().unwrap() = Some(session);
     Ok(())
 }
@@ -60,8 +63,7 @@ pub fn get_edge_by_lineart_anime(
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let inputs = ort::inputs!["input" => tensor_val]
-        .map_err(|e| EdgeError::Processing(e.to_string()))?;
+    let inputs = ort::inputs!["input" => tensor_val];
     let outputs = session
         .run(inputs)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
@@ -79,7 +81,11 @@ pub fn get_edge_by_lineart_anime(
     // 元サイズにリサイズ
     let mask_img = mask_to_image(&single_ch, rw, rh);
     let scale = (orig_w as f32 / rw as f32).max(orig_h as f32 / rh as f32);
-    let filter = if scale > 1.0 { FilterType::Lanczos3 } else { FilterType::CatmullRom };
+    let filter = if scale > 1.0 {
+        FilterType::Lanczos3
+    } else {
+        FilterType::CatmullRom
+    };
     let mask_resized = DynamicImage::ImageRgb8(mask_img).resize_exact(orig_w, orig_h, filter);
     let mask_rgb = mask_resized.to_rgb8();
 

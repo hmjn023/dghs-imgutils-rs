@@ -43,10 +43,10 @@ fn ensure_nsfw_model(model_name: &str) -> Result<(), InferenceError> {
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
     let session = create_onnx_session(&model_path)?;
 
-    NSFW_CACHE.lock().unwrap().insert(
-        model_name.to_string(),
-        NsfwModel { session, size },
-    );
+    NSFW_CACHE
+        .lock()
+        .unwrap()
+        .insert(model_name.to_string(), NsfwModel { session, size });
     Ok(())
 }
 
@@ -84,10 +84,10 @@ pub fn nsfw_pred_score(
         .run(ort::inputs!["input_1" => ort::value::Tensor::from_array(tensor.clone())?])
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
 
-    let output = outputs["dense_3"]
+    let (_, output_data) = outputs["dense_3"]
         .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
-    let probs: Vec<f32> = output.as_slice().unwrap_or(&[]).to_vec();
+    let probs: Vec<f32> = output_data.to_vec();
 
     let result: HashMap<String, f32> = NSFW_LABELS
         .iter()

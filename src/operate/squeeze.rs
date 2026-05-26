@@ -47,10 +47,18 @@ pub fn squeeze(img: &DynamicImage, mask: &Vec<Vec<bool>>) -> Result<DynamicImage
     for r in 0..rows.min(h) {
         for c in 0..cols.min(w) {
             if mask[r as usize][c as usize] {
-                if r < row_min { row_min = r; }
-                if r > row_max { row_max = r; }
-                if c < col_min { col_min = c; }
-                if c > col_max { col_max = c; }
+                if r < row_min {
+                    row_min = r;
+                }
+                if r > row_max {
+                    row_max = r;
+                }
+                if c < col_min {
+                    col_min = c;
+                }
+                if c > col_max {
+                    col_max = c;
+                }
             }
         }
     }
@@ -60,7 +68,12 @@ pub fn squeeze(img: &DynamicImage, mask: &Vec<Vec<bool>>) -> Result<DynamicImage
     }
 
     // Pillow crop: (left, upper, right, lower) = (col_min, row_min, col_max+1, row_max+1)
-    let cropped = img.crop_imm(col_min, row_min, col_max - col_min + 1, row_max - row_min + 1);
+    let cropped = img.crop_imm(
+        col_min,
+        row_min,
+        col_max - col_min + 1,
+        row_max - row_min + 1,
+    );
     Ok(cropped)
 }
 
@@ -103,7 +116,9 @@ pub fn squeeze_with_transparency(
 /// ウィンドウ内の true の個数が過半数なら true、そうでなければ false。
 fn apply_median_filter(mask: &Vec<Vec<bool>>, size: usize) -> Vec<Vec<bool>> {
     let h = mask.len();
-    if h == 0 { return mask.clone(); }
+    if h == 0 {
+        return mask.clone();
+    }
     let w = mask[0].len();
     let half = size / 2;
     let threshold = (size * size) / 2; // 過半数
@@ -115,11 +130,17 @@ fn apply_median_filter(mask: &Vec<Vec<bool>>, size: usize) -> Vec<Vec<bool>> {
             let mut count = 0usize;
             for dr in 0..size {
                 let rr = (r + dr).saturating_sub(half);
-                if rr >= h { continue; }
+                if rr >= h {
+                    continue;
+                }
                 for dc in 0..size {
                     let cc = (c + dc).saturating_sub(half);
-                    if cc >= w { continue; }
-                    if mask[rr][cc] { count += 1; }
+                    if cc >= w {
+                        continue;
+                    }
+                    if mask[rr][cc] {
+                        count += 1;
+                    }
                 }
             }
             result[r][c] = count > threshold;

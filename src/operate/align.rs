@@ -2,7 +2,7 @@
 //!
 //! Python 版: `align_maxsize(image, max_size)` → 長辺を `max_size` に合わせてアスペクト比維持リサイズ。
 
-use image::{DynamicImage, imageops::FilterType};
+use image::{DynamicImage, GenericImageView, imageops::FilterType};
 
 /// 画像の長辺が `max_size` を超える場合、アスペクト比を維持しながらリサイズします。
 ///
