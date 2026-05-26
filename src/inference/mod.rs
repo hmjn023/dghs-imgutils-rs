@@ -37,26 +37,56 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
 
     // 1. TensorRT (NVIDIA 高性能 GPU)
     let trt = TensorRTExecutionProvider::default();
-    if trt.is_available().unwrap_or(false) {
-        providers.push(trt.build());
+    match trt.is_available() {
+        Ok(true) => {
+            println!("[ort] TensorRT EP is available! Enabling TRT.");
+            providers.push(trt.build());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            println!("[ort] TensorRT EP check error: {:?}", e);
+        }
     }
 
     // 2. CUDA (NVIDIA 標準 GPU)
     let cuda = CUDAExecutionProvider::default();
-    if cuda.is_available().unwrap_or(false) {
-        providers.push(cuda.build());
+    match cuda.is_available() {
+        Ok(true) => {
+            println!("[ort] CUDA EP is available! Enabling NVIDIA GPU acceleration.");
+            providers.push(cuda.build());
+        }
+        Ok(false) => {
+            println!("[ort] CUDA EP is not available (returned false).");
+        }
+        Err(e) => {
+            println!("[ort] CUDA EP check error: {:?}", e);
+        }
     }
 
     // 3. DirectML (Windows NPU/GPU)
     let dml = DirectMLExecutionProvider::default();
-    if dml.is_available().unwrap_or(false) {
-        providers.push(dml.build());
+    match dml.is_available() {
+        Ok(true) => {
+            println!("[ort] DirectML EP is available! Enabling DirectML.");
+            providers.push(dml.build());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            println!("[ort] DirectML EP check error: {:?}", e);
+        }
     }
 
     // 4. OpenVINO (Intel CPU/GPU/NPU)
     let openvino = OpenVINOExecutionProvider::default();
-    if openvino.is_available().unwrap_or(false) {
-        providers.push(openvino.build());
+    match openvino.is_available() {
+        Ok(true) => {
+            println!("[ort] OpenVINO EP is available! Enabling Intel NPU/GPU/CPU acceleration.");
+            providers.push(openvino.build());
+        }
+        Ok(false) => {}
+        Err(e) => {
+            println!("[ort] OpenVINO EP check error: {:?}", e);
+        }
     }
 
     if !providers.is_empty() {
