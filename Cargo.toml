@@ -6,6 +6,10 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "adversarial_bench"
+path = "benches/adversarial_bench.rs"
+
 [dependencies]
 csv = "1.4.0"
 hf-hub = "0.5.0"

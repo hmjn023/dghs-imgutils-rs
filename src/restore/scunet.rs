@@ -5,11 +5,10 @@
 //! 対応モデル: GAN, PSNR
 
 use image::DynamicImage;
-use ndarray::{Array3, Array4, Axis};
-use std::sync::Mutex;
+use ndarray::{Array3, Axis};
 
 use crate::hub::hf_hub_download;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::utils::area::area_batch_run;
 
 use super::RestoreError;
@@ -46,8 +45,7 @@ fn scunet_process_rgb(
     let w = rgb_array.shape()[2];
 
     let model_path = get_scunet_model_path(model)?;
-    let session = create_onnx_session(model_path)?;
-    let session = Mutex::new(session);
+    let session = get_or_create_session(model_path)?;
 
     let input_ = rgb_array
         .to_owned()
@@ -56,21 +54,23 @@ fn scunet_process_rgb(
     let output_ = area_batch_run(
         &input_,
         |ix| {
-            let mut session = session.lock().unwrap();
+            let mut session = session.lock().map_err(|e| {
+                RestoreError::Shape(format!("Session lock poisoned: {e}"))
+            })?;
             let tensor =
-                ort::value::Tensor::from_array(ix.clone()).expect("Failed to create input tensor");
+                ort::value::Tensor::from_array(ix.clone()).map_err(RestoreError::Ort)?;
             let outputs = session
                 .run(ort::inputs!["input" => tensor])
-                .expect("SCUNet inference failed");
+                .map_err(RestoreError::Ort)?;
             let raw_output = outputs[0]
                 .try_extract_tensor::<f32>()
-                .expect("Failed to extract output tensor");
+                .map_err(RestoreError::Ort)?;
             let (out_shape, out_data) = raw_output;
             let out_shape_v: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
             let (b, c, h, w) = (out_shape_v[0], out_shape_v[1], out_shape_v[2], out_shape_v[3]);
             let out_data = out_data.to_owned();
             ndarray::Array4::from_shape_vec((b, c, h, w), out_data)
-                .expect("Failed to create output array")
+                .map_err(|e| RestoreError::Shape(e.to_string()))
         },
         1,
         tile_size,
@@ -78,7 +78,7 @@ fn scunet_process_rgb(
         batch_size,
         3,
         3,
-    );
+    )?;
 
     let output_ = output_.mapv(|v| v.clamp(0.0, 1.0));
     Ok(output_.index_axis(Axis(0), 0).to_owned())

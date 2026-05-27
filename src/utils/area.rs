@@ -1,6 +1,21 @@
 use ndarray::{Array4, ArrayView4, s};
 
-pub fn area_batch_run<F>(
+/// タイルベースのバッチ推論を実行する。
+///
+/// 入力画像をタイルに分割し、各タイルに `func` を適用して結果を合成する。
+/// タイル間の重複部分は重み付き平均でブレンドする。
+///
+/// # 引数
+///
+/// * `origin_input` - 入力テンソル `[B, C, H, W]`
+/// * `func` - 各タイルに適用する推論関数（エラーを返す可能性あり）
+/// * `scale` - 出力スケール倍率
+/// * `tile_size` - タイルサイズ
+/// * `tile_overlap` - タイル間の重複ピクセル数
+/// * `batch_size` - バッチサイズ
+/// * `input_channels` - 入力チャンネル数
+/// * `output_channels` - 出力チャンネル数
+pub fn area_batch_run<F, E>(
     origin_input: &Array4<f32>,
     func: F,
     scale: usize,
@@ -9,9 +24,9 @@ pub fn area_batch_run<F>(
     batch_size: usize,
     input_channels: usize,
     output_channels: usize,
-) -> Array4<f32>
+) -> Result<Array4<f32>, E>
 where
-    F: Fn(&Array4<f32>) -> Array4<f32>,
+    F: Fn(&Array4<f32>) -> Result<Array4<f32>, E>,
 {
     let shape = origin_input.shape();
     let batch = shape[0];
@@ -83,7 +98,7 @@ where
             ndarray::concatenate(ndarray::Axis(0), &padded_views).unwrap()
         };
 
-        let output = func(&batch_chunk);
+        let output = func(&batch_chunk)?;
         let start_idx = i * batch_size;
 
         for (j, _) in chunk.iter().enumerate() {
@@ -118,18 +133,20 @@ where
     }
 
     let inv_weight = weight.mapv(|w| if w > 0.0 { 1.0 / w } else { 0.0 });
-    sum_ * inv_weight
+    Ok(sum_ * inv_weight)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    type TestError = Box<dyn std::error::Error>;
+
     #[test]
     fn test_area_batch_run_identity() {
         let input = Array4::<f32>::ones((1, 3, 64, 64));
-        let identity = |x: &Array4<f32>| x.clone();
-        let result = area_batch_run(&input, identity, 1, 32, 4, 4, 3, 3);
+        let identity = |x: &Array4<f32>| Ok::<_, TestError>(x.clone());
+        let result = area_batch_run(&input, identity, 1, 32, 4, 4, 3, 3).unwrap();
         assert_eq!(result.shape(), &[1, 3, 64, 64]);
     }
 
@@ -137,8 +154,8 @@ mod tests {
     fn test_area_batch_run_small() {
         let input =
             Array4::<f32>::from_shape_fn((1, 1, 16, 16), |(_, _, h, w)| (h * 16 + w) as f32);
-        let identity = |x: &Array4<f32>| x.clone();
-        let result = area_batch_run(&input, identity, 1, 16, 4, 4, 1, 1);
+        let identity = |x: &Array4<f32>| Ok::<_, TestError>(x.clone());
+        let result = area_batch_run(&input, identity, 1, 16, 4, 4, 1, 1).unwrap();
         assert_eq!(result.shape(), &[1, 1, 16, 16]);
     }
 }

@@ -10,8 +10,17 @@ pub use yolo::{
     xy_postprocess, yolo_nms, yolo_predict, yolo_xywh2xyxy,
 };
 
+use once_cell::sync::Lazy;
 use ort::session::Session;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/// ONNX セッションのキャッシュ。
+/// モデルファイルパスをキーとして、作成済みセッションを共有する。
+/// `Session::run` が `&mut self` を必要とするため、`Mutex` で保護する。
+static SESSION_CACHE: Lazy<Mutex<HashMap<String, Arc<Mutex<Session>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// ONNX Runtime のグローバル環境を初期化します。
 ///
@@ -104,6 +113,31 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
     let session = builder
         .commit_from_file(model_path)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    Ok(session)
+}
+
+/// キャッシュ付きで ONNX セッションを取得する。
+///
+/// モデルファイルパスが同じ場合はキャッシュからセッションを返す。
+/// セッションは `Arc<Mutex<Session>>` で共有され、スレッドセーフに利用できる。
+///
+/// # 引数
+///
+/// * `model_path` - ONNX モデルファイルへのパス
+pub fn get_or_create_session<P: AsRef<Path>>(model_path: P) -> Result<Arc<Mutex<Session>>, InferenceError> {
+    let path_str = model_path.as_ref().to_string_lossy().to_string();
+
+    let mut cache = SESSION_CACHE.lock().map_err(|e| {
+        InferenceError::Initialization(format!("Session cache lock poisoned: {e}"))
+    })?;
+
+    if let Some(session) = cache.get(&path_str) {
+        return Ok(Arc::clone(session));
+    }
+
+    let session = create_onnx_session(&path_str)?;
+    let session = Arc::new(Mutex::new(session));
+    cache.insert(path_str, Arc::clone(&session));
     Ok(session)
 }
 

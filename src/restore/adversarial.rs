@@ -9,6 +9,56 @@ use rand::Rng;
 
 use super::RestoreError;
 
+/// adversarial noise removal のパラメータ。
+///
+/// Python 版 `remove_adversarial_noise` の全パラメータを網羅する。
+#[derive(Debug, Clone)]
+pub struct AdversarialNoiseParams {
+    /// Bilateral filtering の反復回数（デフォルト: 64）。
+    pub b_iters: usize,
+    /// Guided filtering の反復回数（デフォルト: 8）。
+    pub g_iters: usize,
+    /// Bilateral filter の直径の最小値（デフォルト: 4）。
+    pub diameter_min: usize,
+    /// Bilateral filter の直径の最大値（デフォルト: 6）。
+    pub diameter_max: usize,
+    /// Bilateral filter の sigma_color の最小値（デフォルト: 6.0）。
+    pub sigma_color_min: f32,
+    /// Bilateral filter の sigma_color の最大値（デフォルト: 10.0）。
+    pub sigma_color_max: f32,
+    /// Bilateral filter の sigma_space の最小値（デフォルト: 6.0）。
+    pub sigma_space_min: f32,
+    /// Bilateral filter の sigma_space の最大値（デフォルト: 10.0）。
+    pub sigma_space_max: f32,
+    /// Guided filter の radius の最小値（デフォルト: 3）。
+    pub radius_min: usize,
+    /// Guided filter の radius の最大値（デフォルト: 6）。
+    pub radius_max: usize,
+    /// Guided filter の eps の最小値（デフォルト: 16.0）。
+    pub eps_min: f32,
+    /// Guided filter の eps の最大値（デフォルト: 24.0）。
+    pub eps_max: f32,
+}
+
+impl Default for AdversarialNoiseParams {
+    fn default() -> Self {
+        Self {
+            b_iters: 64,
+            g_iters: 8,
+            diameter_min: 4,
+            diameter_max: 6,
+            sigma_color_min: 6.0,
+            sigma_color_max: 10.0,
+            sigma_space_min: 6.0,
+            sigma_space_max: 10.0,
+            radius_min: 3,
+            radius_max: 6,
+            eps_min: 16.0,
+            eps_max: 24.0,
+        }
+    }
+}
+
 /// Apply a box (mean) filter to a 2D array.
 /// Uses direct O(HW*R^2) summation (R ≤ 6, so performance is acceptable).
 fn box_filter_2d(arr: &Array2<f32>, radius: usize) -> Array2<f32> {
@@ -146,6 +196,26 @@ pub fn remove_adversarial_noise(
     b_iters: usize,
     g_iters: usize,
 ) -> Result<DynamicImage, RestoreError> {
+    let params = AdversarialNoiseParams {
+        b_iters,
+        g_iters,
+        ..Default::default()
+    };
+    remove_adversarial_noise_with_params(image, &params)
+}
+
+/// Remove adversarial noise from an image using randomized bilateral and guided filtering.
+///
+/// Python 版と同一の全パラメータを指定可能。
+///
+/// # Arguments
+///
+/// * `image` - Input image
+/// * `params` - Filtering parameters
+pub fn remove_adversarial_noise_with_params(
+    image: &DynamicImage,
+    params: &AdversarialNoiseParams,
+) -> Result<DynamicImage, RestoreError> {
     let img_rgb = image.to_rgb8();
     let (w, h) = img_rgb.dimensions();
     let h = h as usize;
@@ -164,17 +234,17 @@ pub fn remove_adversarial_noise(
     let mut rng = rand::thread_rng();
 
     // Bilateral filtering iterations
-    for _ in 0..b_iters {
-        let diameter = rng.gen_range(4..=6);
-        let sigma_color = rng.gen_range(6.0..=10.0);
-        let sigma_space = rng.gen_range(6.0..=10.0);
+    for _ in 0..params.b_iters {
+        let diameter = rng.gen_range(params.diameter_min..=params.diameter_max);
+        let sigma_color = rng.gen_range(params.sigma_color_min..=params.sigma_color_max);
+        let sigma_space = rng.gen_range(params.sigma_space_min..=params.sigma_space_max);
         y = bilateral_filter_color(&y, diameter, sigma_color, sigma_space);
     }
 
     // Guided filtering iterations
-    for _ in 0..g_iters {
-        let radius = rng.gen_range(3..=6);
-        let eps = rng.gen_range(16.0..=24.0);
+    for _ in 0..params.g_iters {
+        let radius = rng.gen_range(params.radius_min..=params.radius_max);
+        let eps = rng.gen_range(params.eps_min..=params.eps_max);
         y = guided_filter_color(&original, &y, radius, eps);
     }
 

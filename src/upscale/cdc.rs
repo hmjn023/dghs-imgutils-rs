@@ -5,11 +5,12 @@
 
 use image::DynamicImage;
 use ndarray::{Array3, Array4, Axis, s};
-use ort::session::Session;
-use std::sync::Mutex;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::hub::hf_hub_download;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::utils::area::area_batch_run;
 
 use super::UpscaleError;
@@ -23,16 +24,51 @@ pub const DEFAULT_CDC_MODEL: &str = "HGSR-MHR-anime-aug_X4_320";
 /// 利用可能な主な CDC モデル名。
 pub const CDC_MODELS: &[&str] = &["HGSR-MHR-anime-aug_X4_320"];
 
-/// CDC ONNX モデルを開き、スケールファクターを取得する。
-fn open_cdc_model(model: &str) -> Result<(Session, usize), UpscaleError> {
-    let model_path = hf_hub_download("deepghs/cdc_anime_onnx", &format!("{model}.onnx"), None, None)?;
-    let mut session = create_onnx_session(model_path)?;
+/// CDC モデルのメタデータ（スケールファクター）。
+struct CdcModelMeta {
+    scale: usize,
+}
 
-    let scale_h = {
-        // Warm-up run to detect scale factor from output shape
+/// CDC モデルのメタデータキャッシュ。
+/// モデル名をキーとして、スケールファクターをキャッシュする。
+static CDC_META_CACHE: Lazy<Mutex<HashMap<String, Arc<CdcModelMeta>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// CDC ONNX モデルのセッションとスケールファクターを取得する（キャッシュ付き）。
+fn get_cdc_model(model: &str) -> Result<(Arc<Mutex<ort::session::Session>>, usize), UpscaleError> {
+    // メタデータキャッシュを確認
+    {
+        let cache = CDC_META_CACHE.lock().map_err(|e| {
+            UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}"))
+        })?;
+        if let Some(meta) = cache.get(model) {
+            let model_path = hf_hub_download(
+                "deepghs/cdc_anime_onnx",
+                &format!("{model}.onnx"),
+                None,
+                None,
+            )?;
+            let session = get_or_create_session(model_path)?;
+            return Ok((session, meta.scale));
+        }
+    }
+
+    // キャッシュなし: セッション作成 + warm-up 推論
+    let model_path = hf_hub_download(
+        "deepghs/cdc_anime_onnx",
+        &format!("{model}.onnx"),
+        None,
+        None,
+    )?;
+    let session = get_or_create_session(&model_path)?;
+
+    let scale = {
         let input_data = Array4::<f32>::zeros((1, 3, CDC_INPUT_UNIT, CDC_INPUT_UNIT));
         let tensor = ort::value::Tensor::from_array(input_data)?;
-        let outputs = session
+        let mut session_guard = session.lock().map_err(|e| {
+            UpscaleError::Shape(format!("Session lock poisoned: {e}"))
+        })?;
+        let outputs = session_guard
             .run(ort::inputs!["input" => tensor])
             .map_err(|e| UpscaleError::Shape(format!("CDC warm-up failed: {e}")))?;
         let output_tensor = outputs[0]
@@ -41,7 +77,6 @@ fn open_cdc_model(model: &str) -> Result<(Session, usize), UpscaleError> {
         let (out_shape, _data) = output_tensor;
         let shape: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
 
-        // Expected shape: [1, 3, scale, 16, scale, 16]
         if shape.len() != 6 {
             return Err(UpscaleError::Shape(format!(
                 "CDC model expected 6D output, got {:?}",
@@ -58,7 +93,15 @@ fn open_cdc_model(model: &str) -> Result<(Session, usize), UpscaleError> {
         scale_h as usize
     };
 
-    Ok((session, scale_h))
+    // メタデータをキャッシュに保存
+    {
+        let mut cache = CDC_META_CACHE.lock().map_err(|e| {
+            UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}"))
+        })?;
+        cache.insert(model.to_string(), Arc::new(CdcModelMeta { scale }));
+    }
+
+    Ok((session, scale))
 }
 
 /// CDC の RGB アップスケール処理（内部関数）。
@@ -71,8 +114,7 @@ fn cdc_upscale_rgb(
 ) -> Result<Array3<f32>, UpscaleError> {
     let h = rgb_array.shape()[1];
     let w = rgb_array.shape()[2];
-    let (session, scale) = open_cdc_model(model)?;
-    let session = Mutex::new(session);
+    let (session, scale) = get_cdc_model(model)?;
 
     let input_ = rgb_array
         .to_owned()
@@ -81,8 +123,6 @@ fn cdc_upscale_rgb(
     let output_ = area_batch_run(
         &input_,
         |ix| {
-            let mut session = session.lock().unwrap();
-
             // Align to 16-pixel boundary
             let (_, _, ih, iw) = (ix.shape()[0], ix.shape()[1], ix.shape()[2], ix.shape()[3]);
             let pad_h = (CDC_INPUT_UNIT - ih % CDC_INPUT_UNIT) % CDC_INPUT_UNIT;
@@ -108,34 +148,37 @@ fn cdc_upscale_rgb(
             };
 
             let tensor =
-                ort::value::Tensor::from_array(padded).expect("Failed to create CDC input tensor");
-            let outputs = session
+                ort::value::Tensor::from_array(padded).map_err(UpscaleError::Ort)?;
+            let mut session_guard = session.lock().map_err(|e| {
+                UpscaleError::Shape(format!("Session lock poisoned: {e}"))
+            })?;
+            let outputs = session_guard
                 .run(ort::inputs!["input" => tensor])
-                .expect("CDC inference failed");
+                .map_err(UpscaleError::Ort)?;
             let raw_output = outputs[0]
                 .try_extract_tensor::<f32>()
-                .expect("Failed to extract CDC output tensor");
+                .map_err(UpscaleError::Ort)?;
             let (out_shape, out_data) = raw_output;
             let out_shape_vec: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
             let data = ndarray::ArrayD::from_shape_vec(
                 ndarray::IxDyn(&out_shape_vec),
                 out_data.to_owned(),
             )
-            .expect("Failed to create CDC output array");
+            .map_err(|e| UpscaleError::Shape(e.to_string()))?;
 
             // Reshape from [1, 3, scale, H, scale, W] → [1, 3, scale*H, scale*W]
             let s = data.shape();
             let (b, c, sc1, h_, sc2, w_) = (s[0], s[1], s[2], s[3], s[4], s[5]);
             let reshaped = data
                 .into_shape_with_order(ndarray::IxDyn(&[b, c, sc1 * h_, sc2 * w_]))
-                .expect("Failed to reshape CDC output");
+                .map_err(|e| UpscaleError::Shape(e.to_string()))?;
 
             // Crop to actual scaled size
             let actual_h = scale * ih;
             let actual_w = scale * iw;
-            reshaped
+            Ok::<_, UpscaleError>(reshaped
                 .slice(s![.., .., ..actual_h, ..actual_w])
-                .to_owned()
+                .to_owned())
         },
         scale,
         tile_size,
@@ -143,7 +186,7 @@ fn cdc_upscale_rgb(
         batch_size,
         3,
         3,
-    );
+    )?;
 
     let clipped = output_.mapv(|v| v.clamp(0.0, 1.0));
     Ok(clipped.index_axis(Axis(0), 0).to_owned())
