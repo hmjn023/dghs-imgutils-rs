@@ -1,13 +1,14 @@
 //! 画像操作 (operate) モジュールの napi-rs バインディング。
-//!
-//! - `censor_nsfw_image`: NSFW 検出 → 画像（絵文字/スタンプ）検閲
-//! - `censor_area_image`: 指定領域に画像検閲
-//! - `censor_areas_image`: 複数 BBox 領域に画像検閲
 
 use crate::detect::base::BBox;
+use crate::operate::align::align_maxsize as core_align_maxsize;
 use crate::operate::censor::CensorMethod;
+use crate::operate::censor::censor_nsfw as core_censor_nsfw;
 use crate::operate::censor::censor_nsfw_image as core_censor_nsfw_image;
 use crate::operate::imgcensor::{CensorImageFit, censor_areas_image as core_censor_areas_image};
+use crate::operate::squeeze::{
+    squeeze as core_squeeze, squeeze_with_transparency as core_squeeze_with_transparency,
+};
 use napi_derive::napi;
 
 fn parse_fit(s: Option<String>) -> CensorImageFit {
@@ -27,15 +28,6 @@ pub struct NapiBBoxArea {
 }
 
 /// 画像パスと絵文字/スタンプ画像バッファを受け取り、NSFW 検出 + 画像検閲を実行します。
-///
-/// * `path` - 元画像のファイルパス
-/// * `censor_image_buffer` - 検閲用絵文字/スタンプ画像の PNG/JPEG バッファ（省略時はデフォルトの赤い塗りつぶし）
-/// * `fit` - フィット方法: `"contain"` または `"cover"`（デフォルト `"cover"`）
-/// * `nipple_f` - 女性の乳首を検閲するか（デフォルト `false`）
-/// * `penis` - ペニスを検閲するか（デフォルト `true`）
-/// * `pussy` - プッシーを検閲するか（デフォルト `true`）
-///
-/// 戻り値は PNG エンコードされた画像バッファです。
 #[napi]
 pub fn censor_nsfw_image(
     path: String,
@@ -60,7 +52,6 @@ pub fn censor_nsfw_image(
             )
         })?,
         None => {
-            // Default: solid red stamp (256x256)
             let mut img = image::RgbaImage::new(256, 256);
             for y in 0..256 {
                 for x in 0..256 {
@@ -105,13 +96,6 @@ pub fn censor_nsfw_image(
 }
 
 /// 画像パスと BBox 領域リストを受け取り、指定領域を画像（絵文字/スタンプ）で検閲します。
-///
-/// * `path` - 元画像のファイルパス
-/// * `areas` - 検閲領域のリスト（各要素は `{ x1, y1, x2, y2 }`）
-/// * `censor_image_buffer` - 検閲用画像の PNG/JPEG バッファ
-/// * `fit` - フィット方法: `"contain"` または `"cover"`（デフォルト `"cover"`）
-///
-/// 戻り値は PNG エンコードされた画像バッファです。
 #[napi]
 pub fn censor_areas_with_image(
     path: String,
@@ -161,5 +145,122 @@ pub fn censor_areas_with_image(
             )
         })?;
 
+    Ok(buf.into_inner())
+}
+
+/// 画像の長辺を max_size に合わせてリサイズします。
+#[napi]
+pub fn align_maxsize(path: String, max_size: i32) -> napi::Result<Vec<u8>> {
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image at {}: {}", path, e),
+        )
+    })?;
+    let result = core_align_maxsize(&image, max_size.max(1) as u32);
+    let mut buf = std::io::Cursor::new(Vec::new());
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
+    Ok(buf.into_inner())
+}
+
+/// マスクに基づいて画像をトリミング（squeeze）します。
+#[napi]
+pub fn squeeze(path: String, mask: Vec<Vec<bool>>) -> napi::Result<Vec<u8>> {
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image at {}: {}", path, e),
+        )
+    })?;
+    let result = core_squeeze(&image, &mask).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Squeeze failed: {}", e),
+        )
+    })?;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
+    Ok(buf.into_inner())
+}
+
+/// 透過領域に基づいて画像を自動トリミングします。
+#[napi]
+pub fn squeeze_with_transparency(
+    path: String,
+    threshold: Option<f64>,
+    median_size: Option<i32>,
+) -> napi::Result<Vec<u8>> {
+    let th = threshold.unwrap_or(0.7) as f32;
+    let ms = median_size.unwrap_or(5).max(1) as usize;
+    let result = core_squeeze_with_transparency(&path, th, ms).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Squeeze with transparency failed: {}", e),
+        )
+    })?;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
+    Ok(buf.into_inner())
+}
+
+/// NSFW 検出 + 基本検閲（モザイク/ぼかし/色塗り）を実行します。
+#[napi]
+pub fn censor_nsfw_basic(
+    path: String,
+    method: Option<String>,
+    radius: Option<f64>,
+    nipple_f: Option<bool>,
+    penis: Option<bool>,
+    pussy: Option<bool>,
+) -> napi::Result<Vec<u8>> {
+    let r = radius.unwrap_or(4.0) as f32;
+    let censor_method = match method.as_deref() {
+        Some("blur") => CensorMethod::Blur { radius: r },
+        Some("color") => CensorMethod::Color { color: [255, 0, 0] },
+        _ => CensorMethod::Pixelate { radius: r as u32 },
+    };
+    let result = core_censor_nsfw(
+        &path,
+        &censor_method,
+        nipple_f.unwrap_or(false),
+        penis.unwrap_or(true),
+        pussy.unwrap_or(true),
+    )
+    .map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("NSFW censor failed: {}", e),
+        )
+    })?;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    result
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to encode output image: {}", e),
+            )
+        })?;
     Ok(buf.into_inner())
 }

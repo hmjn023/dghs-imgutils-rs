@@ -183,3 +183,84 @@ pub fn is_blacklisted(tag: String) -> bool {
 pub fn is_basic_character_tag(tag: String) -> bool {
     crate::tagging::character::is_basic_character_tag(&tag)
 }
+
+#[napi]
+pub fn drop_blacklisted_tags(
+    tags: HashMap<String, f64>,
+    use_presets: Option<bool>,
+) -> HashMap<String, f64> {
+    let vec: Vec<(String, f32)> = tags.into_iter().map(|(k, v)| (k, v as f32)).collect();
+    let up = use_presets.unwrap_or(true);
+    crate::tagging::blacklist::drop_blacklisted_tags(&vec, up)
+        .into_iter()
+        .map(|(k, v)| (k, v as f64))
+        .collect()
+}
+
+#[napi]
+pub fn drop_overlap_tags(tags: HashMap<String, f64>) -> HashMap<String, f64> {
+    let vec: Vec<(String, f32)> = tags.into_iter().map(|(k, v)| (k, v as f32)).collect();
+    crate::tagging::overlap::drop_overlap_tags(&vec)
+        .into_iter()
+        .map(|(k, v)| (k, v as f64))
+        .collect()
+}
+
+#[napi]
+pub fn drop_basic_character_tags(tags: HashMap<String, f64>) -> HashMap<String, f64> {
+    let vec: Vec<(String, f32)> = tags.into_iter().map(|(k, v)| (k, v as f32)).collect();
+    crate::tagging::character::drop_basic_character_tags(&vec)
+        .into_iter()
+        .map(|(k, v)| (k, v as f64))
+        .collect()
+}
+
+#[napi]
+pub fn tag_match_suffix(text: String, suffix: String) -> bool {
+    crate::tagging::tag_match::tag_match_suffix(&text, &suffix)
+}
+
+#[napi]
+pub fn tag_match_prefix(text: String, prefix: String) -> bool {
+    crate::tagging::tag_match::tag_match_prefix(&text, &prefix)
+}
+
+#[napi]
+pub fn tag_match_full(t1: String, t2: String) -> bool {
+    crate::tagging::tag_match::tag_match_full(&t1, &t2)
+}
+
+#[napi]
+pub fn add_underline(tag: String) -> String {
+    crate::tagging::format::add_underline(&tag)
+}
+
+#[napi]
+pub fn remove_underline(tag: String) -> String {
+    crate::tagging::format::remove_underline(&tag)
+}
+
+#[napi]
+pub fn tags_to_text(
+    tags: HashMap<String, f64>,
+    use_spaces: Option<bool>,
+    use_escape: Option<bool>,
+    include_score: Option<bool>,
+    score_descend: Option<bool>,
+) -> String {
+    let map: HashMap<String, f32> = tags.into_iter().map(|(k, v)| (k, v as f32)).collect();
+    crate::tagging::format::tags_to_text(
+        &map,
+        use_spaces.unwrap_or(false),
+        use_escape.unwrap_or(true),
+        include_score.unwrap_or(false),
+        score_descend.unwrap_or(true),
+    )
+}
+
+#[napi]
+pub fn sort_tags(tags: HashMap<String, f64>, mode: Option<String>) -> Vec<String> {
+    let map: HashMap<String, f32> = tags.into_iter().map(|(k, v)| (k, v as f32)).collect();
+    let m = mode.as_deref().unwrap_or("score");
+    crate::tagging::order::sort_tags(&map, m)
+}

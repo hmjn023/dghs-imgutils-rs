@@ -12,11 +12,15 @@ use crate::detect::head::detect_heads as core_detect_heads;
 use crate::detect::nudenet::detect_with_nudenet as core_detect_with_nudenet;
 use crate::detect::person::detect_person as core_detect_person;
 use crate::detect::similarity::{
-    bboxes_similarity as core_bboxes_similarity, detection_similarity as core_detection_similarity,
+    bboxes_similarity as core_bboxes_similarity, calculate_mask_iou as core_calculate_mask_iou,
+    detection_similarity as core_detection_similarity,
+    detection_with_mask_similarity as core_detection_with_mask_similarity,
+    masks_similarity as core_masks_similarity,
 };
 use crate::detect::text::detect_text as core_detect_text;
 use crate::detect::visual::detection_visualize as core_detection_visualize;
 use napi_derive::napi;
+use ndarray::Array2;
 
 /// 境界ボックスを JS/TS 側で表現する構造体
 #[napi(object)]
@@ -454,4 +458,104 @@ pub fn detection_visualize(
         })?;
 
     Ok(buf.into_inner())
+}
+
+/// 2つのマスク間の IoU (Intersection over Union) を計算します。
+///
+/// * `mask1`: 1つ目のマスク（2次元のf64配列）
+/// * `mask2`: 2つ目のマスク（2次元のf64配列）
+/// * `threshold`: 二値化のしきい値（デフォルト 0.5）
+#[napi]
+pub fn calculate_mask_iou(
+    mask1: Vec<Vec<f64>>,
+    mask2: Vec<Vec<f64>>,
+    threshold: Option<f64>,
+) -> napi::Result<f64> {
+    let to_array2 = |mask: Vec<Vec<f64>>| -> napi::Result<Array2<f32>> {
+        let rows = mask.len();
+        if rows == 0 {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                "Mask must not be empty".to_string(),
+            ));
+        }
+        let cols = mask[0].len();
+        let mut data = Vec::with_capacity(rows * cols);
+        for row in &mask {
+            if row.len() != cols {
+                return Err(napi::Error::new(
+                    napi::Status::InvalidArg,
+                    "All rows must have the same length".to_string(),
+                ));
+            }
+            for &v in row {
+                data.push(v as f32);
+            }
+        }
+        Array2::from_shape_vec((rows, cols), data).map_err(|e| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("Invalid mask shape: {}", e),
+            )
+        })
+    };
+
+    let a1 = to_array2(mask1)?;
+    let a2 = to_array2(mask2)?;
+    let th = threshold.unwrap_or(0.5) as f32;
+    let iou = core_calculate_mask_iou(&a1, &a2, th);
+    Ok(iou as f64)
+}
+
+/// 複数のマスク間のペア類似度を計算します。
+#[napi]
+pub fn masks_similarity(
+    masks1: Vec<Vec<Vec<f64>>>,
+    masks2: Vec<Vec<Vec<f64>>>,
+    threshold: Option<f64>,
+) -> napi::Result<Vec<f64>> {
+    let to_array2 = |mask: Vec<Vec<f64>>| -> napi::Result<Array2<f32>> {
+        let rows = mask.len();
+        let cols = mask[0].len();
+        let mut data = Vec::with_capacity(rows * cols);
+        for row in &mask {
+            for &v in row {
+                data.push(v as f32);
+            }
+        }
+        Array2::from_shape_vec((rows, cols), data).map_err(|e| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("Invalid mask shape: {}", e),
+            )
+        })
+    };
+
+    let a1: Vec<Array2<f32>> = masks1
+        .into_iter()
+        .map(to_array2)
+        .collect::<napi::Result<Vec<_>>>()?;
+    let a2: Vec<Array2<f32>> = masks2
+        .into_iter()
+        .map(to_array2)
+        .collect::<napi::Result<Vec<_>>>()?;
+    let th = threshold.unwrap_or(0.5) as f32;
+
+    let sims = core_masks_similarity(&a1, &a2, th);
+    Ok(sims.into_iter().map(|v| v as f64).collect())
+}
+
+/// 検出結果（bbox + mask）のペア類似度を計算します。
+#[napi]
+pub fn detection_with_mask_similarity(
+    detect1: Vec<NapiDetection>,
+    detect2: Vec<NapiDetection>,
+    threshold: Option<f64>,
+) -> napi::Result<Vec<f64>> {
+    let core_d1: Vec<CoreDetection> = detect1.into_iter().map(CoreDetection::from).collect();
+    let core_d2: Vec<CoreDetection> = detect2.into_iter().map(CoreDetection::from).collect();
+    let th = threshold.unwrap_or(0.5) as f32;
+
+    let sims = core_detection_with_mask_similarity(&core_d1, &core_d2, th);
+    Ok(sims.into_iter().map(|v| v as f64).collect())
 }

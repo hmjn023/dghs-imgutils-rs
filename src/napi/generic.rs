@@ -1,7 +1,9 @@
 use crate::generic::clip;
 use crate::generic::siglip;
+use crate::generic::timm;
 use crate::generic::yoloseg;
 use napi_derive::napi;
+use std::collections::HashMap;
 
 /// Encode an image into CLIP embeddings.
 /// Returns [embeddings, encodings] as flat f64 arrays.
@@ -170,4 +172,75 @@ pub fn yolo_segment(
             }
         })
         .collect())
+}
+
+/// Encode text into SigLIP embeddings.
+#[napi]
+pub fn siglip_text_encode(
+    texts: Vec<String>,
+    repo_id: Option<String>,
+    model_name: String,
+) -> napi::Result<Vec<Vec<f64>>> {
+    let repo = repo_id.unwrap_or_else(|| "deepghs/siglip_onnx".to_string());
+    let (embeddings, _encodings) = siglip::siglip_text_encode(&texts, &repo, &model_name)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    Ok(embeddings
+        .into_iter()
+        .map(|v| v.into_iter().map(|x| x as f64).collect())
+        .collect())
+}
+
+/// TIMM モデルで画像を分類し、スコアを返します。
+#[napi]
+pub fn classify_timm_predict(
+    path: String,
+    repo_id: String,
+    topk: Option<i32>,
+) -> napi::Result<HashMap<String, f64>> {
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
+    let tk = topk.map(|v| v.max(1) as usize);
+    let result = timm::classify_timm_predict(&image, &repo_id, tk)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    Ok(result.into_iter().map(|(k, v)| (k, v as f64)).collect())
+}
+
+/// TIMM マルチラベルモデルで画像を分類し、スコアを返します。
+#[napi(object)]
+pub struct MultiLabelResult {
+    pub categories: HashMap<String, HashMap<String, f64>>,
+    pub tags: HashMap<String, f64>,
+}
+
+#[napi]
+pub fn multilabel_timm_predict(
+    path: String,
+    repo_id: String,
+    thresholds: Option<HashMap<String, f64>>,
+) -> napi::Result<MultiLabelResult> {
+    let image = image::open(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
+    let th = thresholds.map(|m| m.into_iter().map(|(k, v)| (k, v as f32)).collect());
+    let result = timm::multilabel_timm_predict(&image, &repo_id, th)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    Ok(MultiLabelResult {
+        categories: result
+            .categories
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().map(|(k2, v2)| (k2, v2 as f64)).collect()))
+            .collect(),
+        tags: result
+            .tags
+            .into_iter()
+            .map(|(k, v)| (k, v as f64))
+            .collect(),
+    })
 }
