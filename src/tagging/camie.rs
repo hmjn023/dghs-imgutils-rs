@@ -1,6 +1,7 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
 use crate::inference::create_onnx_session;
+use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array4;
@@ -182,6 +183,7 @@ pub fn get_camie_tags(
     mode: &str,
     thresholds: Option<HashMap<String, f32>>,
     no_underline: bool,
+    drop_overlap: bool,
 ) -> Result<TagResult, TaggingError> {
     let preproc_path = hf_hub_download(
         REPO_ID,
@@ -333,6 +335,12 @@ pub fn get_camie_tags(
     character.sort_by(sort_fn);
     all_tags.sort_by(sort_fn);
 
+    if drop_overlap {
+        general = drop_overlap_tags(&general);
+        all_tags = general.iter().chain(character.iter()).cloned().collect();
+        all_tags.sort_by(sort_fn);
+    }
+
     let mut rest = HashMap::new();
     rest.insert("rating".to_string(), rating);
 
@@ -346,5 +354,5 @@ pub fn get_camie_tags(
 }
 
 pub fn get_camie_tags_simple(image: &DynamicImage) -> Result<TagResult, TaggingError> {
-    get_camie_tags(image, "initial", "balanced", None, false)
+    get_camie_tags(image, "initial", "balanced", None, false, false)
 }

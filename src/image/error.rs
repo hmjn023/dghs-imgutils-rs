@@ -28,4 +28,8 @@ pub enum ImageError {
     /// Base64 デコードエラー
     #[error("Base64 decode error: {0}")]
     Base64(String),
+
+    /// 汎用的な処理エラー
+    #[error("Processing error: {0}")]
+    Processing(String),
 }

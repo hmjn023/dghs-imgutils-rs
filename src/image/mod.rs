@@ -15,6 +15,7 @@ pub use load::{
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use ndarray::Array4;
+use std::io::Read;
 
 /// アスペクト比を維持しながら画像をリサイズし、余りを指定色でパディングします。
 ///
@@ -138,6 +139,205 @@ pub fn to_ndarray_chw(
     }
 
     Ok(array)
+}
+
+// ─── Batch load ───
+
+/// 複数の画像ソースを一括で読み込みます。
+///
+/// * `sources` — 画像ソースのスライス
+pub fn load_images(sources: &[ImageSource]) -> Result<Vec<DynamicImage>, ImageError> {
+    sources.iter().map(|s| load_image(s)).collect()
+}
+
+// ─── Alpha channel check ───
+
+/// 画像がアルファチャンネルを持つかどうかを判定します。
+pub fn has_alpha_channel(img: &DynamicImage) -> bool {
+    img.color().has_alpha()
+}
+
+// ─── Blob URL ───
+
+/// 画像を Base64 エンコードされたデータ URI (blob URL) に変換します。
+///
+/// * `img` — 入力画像
+/// * `format` — 画像形式 (`"jpg"`, `"png"`, `"webp"` 等)
+pub fn to_blob_url(img: &DynamicImage, format: &str) -> Result<String, ImageError> {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+
+    let format_upper = format.to_uppercase();
+    let format_normalized = match format_upper.as_str() {
+        "JPG" => "JPEG",
+        other => other,
+    };
+
+    let mime = match format_normalized {
+        "JPEG" => "image/jpeg",
+        "PNG" => "image/png",
+        "WEBP" => "image/webp",
+        "GIF" => "image/gif",
+        "BMP" => "image/bmp",
+        _ => {
+            return Err(ImageError::InvalidArgument(format!(
+                "Unsupported format: {}",
+                format
+            )));
+        }
+    };
+
+    let image_format = match format_normalized {
+        "JPEG" => image::ImageFormat::Jpeg,
+        "PNG" => image::ImageFormat::Png,
+        "WEBP" => image::ImageFormat::WebP,
+        "GIF" => image::ImageFormat::Gif,
+        "BMP" => image::ImageFormat::Bmp,
+        _ => {
+            return Err(ImageError::InvalidArgument(format!(
+                "Unsupported format: {}",
+                format
+            )));
+        }
+    };
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image_format)
+        .map_err(|e| ImageError::Processing(e.to_string()))?;
+    let encoded = STANDARD.encode(buf.into_inner());
+
+    Ok(format!("data:{};base64,{}", mime, encoded))
+}
+
+/// Base64 デコードされたデータ URI (blob URL) から画像を読み込みます。
+pub fn load_image_from_blob_url(blob_url: &str) -> Result<DynamicImage, ImageError> {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+
+    let parts: Vec<&str> = blob_url.splitn(2, ',').collect();
+    if parts.len() != 2 {
+        return Err(ImageError::InvalidArgument(
+            "Invalid blob URL format".to_string(),
+        ));
+    }
+
+    let header = parts[0];
+    let data = parts[1];
+
+    // エンコーディングを確認 (base64 のみサポート)
+    let is_base64 = header.contains(";base64");
+    if !is_base64 {
+        return Err(ImageError::InvalidArgument(
+            "Only base64 encoding is supported".to_string(),
+        ));
+    }
+
+    let decoded = STANDARD
+        .decode(data)
+        .map_err(|e| ImageError::InvalidArgument(format!("Base64 decode failed: {}", e)))?;
+
+    image::load_from_memory(&decoded).map_err(|e| ImageError::Processing(e.to_string()))
+}
+
+// ─── URL download ───
+
+/// URL から画像をダウンロードします。
+///
+/// GitHub URL (`?raw=True` 付与) や HuggingFace URL (`/blob/` → `/resolve/` 変換) を
+/// 自動変換します。
+pub fn download_image_from_url(url: &str) -> Result<DynamicImage, ImageError> {
+    let actual_url = transform_url(url);
+    let mut bytes = Vec::new();
+    ureq::get(&actual_url)
+        .call()
+        .map_err(|e| {
+            ImageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| ImageError::Io(e))?;
+    image::load_from_memory(&bytes).map_err(|e| ImageError::Processing(e.to_string()))
+}
+
+/// GitHub / HuggingFace の URL をダウンロード可能な raw URL に変換します。
+fn transform_url(url: &str) -> String {
+    // GitHub: ?raw=True を追加
+    if url.contains("github.com") && url.contains("/blob/") && !url.contains("?raw=") {
+        return format!("{}?raw=True", url);
+    }
+    // HuggingFace: /blob/ → /resolve/
+    if url.contains("huggingface.co") && url.contains("/blob/") {
+        return url.replace("/blob/", "/resolve/");
+    }
+    url.to_string()
+}
+
+// ─── Grid background ───
+
+/// チェッカーボードパターンのグリッド背景画像を生成します。
+///
+/// 透過画像の可視化に使用します。
+///
+/// * `width` — 画像幅
+/// * `height` — 画像高さ
+/// * `step` — グリッドのマス目サイズ (`None` で自動計算)
+/// * `forecolor` — 前景色 (グリッド線)
+/// * `backcolor` — 背景色
+pub fn grid_background(
+    width: u32,
+    height: u32,
+    step: Option<u32>,
+    forecolor: [u8; 3],
+    backcolor: [u8; 3],
+) -> DynamicImage {
+    let s = step.unwrap_or_else(|| ((width as f64 * height as f64 / 800.0).sqrt() as u32).max(1));
+    if s == 0 {
+        return DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            width,
+            height,
+            image::Rgb(backcolor),
+        ));
+    }
+
+    let mut img = image::RgbImage::new(width, height);
+    for y in 0..height {
+        for x in 0..width {
+            let color = if (x / s + y / s) % 2 == 0 {
+                backcolor
+            } else {
+                forecolor
+            };
+            img.put_pixel(x, y, image::Rgb(color));
+        }
+    }
+    DynamicImage::ImageRgb8(img)
+}
+
+/// 画像の透過部分をグリッド背景で表示します。
+///
+/// * `img` — 入力画像 (RGBA)
+/// * `step` — グリッドサイズ
+/// * `forecolor` — グリッド前景色
+/// * `backcolor` — グリッド背景色
+pub fn grid_transparent(
+    img: &DynamicImage,
+    step: Option<u32>,
+    forecolor: [u8; 3],
+    backcolor: [u8; 3],
+) -> DynamicImage {
+    let (w, h) = img.dimensions();
+    let bg = grid_background(w, h, step, forecolor, backcolor);
+    let layers = vec![
+        LayerItemBuilder::from_image(bg).with_alpha(1.0),
+        LayerItemBuilder::from_image(img.clone()).with_alpha(1.0),
+    ];
+    match istack(layers, Some((w, h))) {
+        Ok(rgba) => DynamicImage::ImageRgba8(rgba),
+        Err(_) => img.clone(),
+    }
 }
 
 #[cfg(test)]

@@ -157,6 +157,87 @@ pub fn get_nai_metadata(path: String) -> napi::Result<Option<NaiMetadataResult>>
     }
 }
 
+/// 画像から SD メタデータを抽出します（画像ファイル直接読み取り版）。
+#[napi]
+pub fn get_sdmeta_from_image(path: String) -> napi::Result<Option<SdMetadataResult>> {
+    let meta = crate::sd::metadata::get_sdmeta_from_image(&path);
+    match meta {
+        Some(m) => Ok(Some(SdMetadataResult {
+            prompt: m.prompt,
+            neg_prompt: m.neg_prompt,
+            parameters: m.parameters,
+        })),
+        None => Ok(None),
+    }
+}
+
+/// 画像ファイルに SD メタデータを保存します。
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `prompt` — メインプロンプト
+/// * `neg_prompt` — ネガティブプロンプト
+/// * `parameters` — パラメーターのキーバリューマップ
+#[napi]
+pub fn save_image_with_sdmeta(
+    src_path: String,
+    dst_path: String,
+    prompt: String,
+    neg_prompt: String,
+    parameters: HashMap<String, String>,
+) -> napi::Result<()> {
+    let meta = crate::sd::metadata::SDMetaData {
+        prompt,
+        neg_prompt,
+        parameters,
+    };
+    crate::sd::metadata::save_image_with_sdmeta(&src_path, &dst_path, &meta).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to save image with SD metadata: {e}"),
+        )
+    })
+}
+
+/// PNG 画像に `parameters` テキストチャンクを書き込みます。
+#[napi]
+pub fn write_geninfo_parameters(
+    src_path: String,
+    dst_path: String,
+    geninfo: String,
+) -> napi::Result<()> {
+    crate::metadata::geninfo::write_geninfo_parameters(&src_path, &dst_path, &geninfo).map_err(
+        |e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to write geninfo parameters: {e}"),
+            )
+        },
+    )
+}
+
+/// JPEG/WebP 画像に EXIF UserComment を書き込みます。
+#[napi]
+pub fn write_geninfo_exif(src_path: String, dst_path: String, geninfo: String) -> napi::Result<()> {
+    crate::metadata::geninfo::write_geninfo_exif(&src_path, &dst_path, &geninfo).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to write geninfo EXIF: {e}"),
+        )
+    })
+}
+
+/// GIF 画像にコメント拡張ブロックを書き込みます。
+#[napi]
+pub fn write_geninfo_gif(src_path: String, dst_path: String, geninfo: String) -> napi::Result<()> {
+    crate::metadata::geninfo::write_geninfo_gif(&src_path, &dst_path, &geninfo).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to write geninfo GIF: {e}"),
+        )
+    })
+}
+
 /// Safetensors モデルファイルからメタデータを読み取ります。
 #[napi]
 pub fn read_safetensors_metadata(path: String) -> napi::Result<HashMap<String, String>> {

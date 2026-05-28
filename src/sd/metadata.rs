@@ -200,6 +200,73 @@ pub fn parse_sdmeta_from_text(x: &str) -> SDMetaData {
     }
 }
 
+// ─── Image-level functions ───
+
+use crate::metadata::geninfo::{
+    read_geninfo_exif, read_geninfo_gif, read_geninfo_parameters, write_geninfo_exif,
+    write_geninfo_gif, write_geninfo_parameters,
+};
+
+/// 画像ファイルから SD メタデータを読み取ります。
+///
+/// PNG の場合は `parameters` テキストチャンク、
+/// JPEG/WebP の場合は EXIF UserComment、
+/// GIF の場合はコメント拡張ブロックから取得します。
+///
+/// * `path` — 画像ファイルのパス
+pub fn get_sdmeta_from_image(path: &str) -> Option<SDMetaData> {
+    // 優先順位: PNG parameters → EXIF UserComment → GIF comment
+    let text = read_geninfo_parameters(path)
+        .or_else(|| read_geninfo_exif(path))
+        .or_else(|| read_geninfo_gif(path))?;
+
+    // 空テキストは無効
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    // NAI メタデータでないことを簡易確認
+    if text.contains("tEXtSoftware") && text.contains("NovelAI") {
+        return None;
+    }
+
+    Some(parse_sdmeta_from_text(text))
+}
+
+/// 画像ファイルに SD メタデータを保存します。
+///
+/// 保存先のファイル形式に応じて適切な書き込み方法を選択します:
+/// - PNG: `parameters` テキストチャンク
+/// - JPEG/WebP: EXIF UserComment
+/// - GIF: コメント拡張ブロック
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `metadata` — 書き込む SD メタデータ
+pub fn save_image_with_sdmeta(
+    src_path: &str,
+    dst_path: &str,
+    metadata: &SDMetaData,
+) -> std::io::Result<()> {
+    let geninfo_text = metadata.to_geninfo_text();
+    let ext = std::path::Path::new(dst_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match ext.as_str() {
+        "png" => write_geninfo_parameters(src_path, dst_path, &geninfo_text),
+        "jpg" | "jpeg" | "webp" => write_geninfo_exif(src_path, dst_path, &geninfo_text),
+        "gif" => write_geninfo_gif(src_path, dst_path, &geninfo_text),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Unsupported image format: .{}", ext),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

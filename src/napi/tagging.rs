@@ -86,6 +86,7 @@ pub fn get_deepgelbooru_tags(
     path: String,
     general_threshold: Option<f64>,
     character_threshold: Option<f64>,
+    drop_overlap: Option<bool>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -95,7 +96,7 @@ pub fn get_deepgelbooru_tags(
     })?;
     let gt = general_threshold.unwrap_or(0.3) as f32;
     let ct = character_threshold.unwrap_or(0.3) as f32;
-    let result = core_deepgelbooru(&image, gt, ct).map_err(|e| {
+    let result = core_deepgelbooru(&image, gt, ct, drop_overlap.unwrap_or(false)).map_err(|e| {
         napi::Error::new(
             napi::Status::GenericFailure,
             format!("DeepGelbooru failed: {}", e),
@@ -119,6 +120,7 @@ pub fn get_wd14_tags(
     character_threshold: Option<f64>,
     character_mcut_enabled: Option<bool>,
     no_underline: Option<bool>,
+    drop_overlap: Option<bool>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -132,9 +134,17 @@ pub fn get_wd14_tags(
     let ct = character_threshold.unwrap_or(0.85) as f32;
     let cm = character_mcut_enabled.unwrap_or(false);
     let nu = no_underline.unwrap_or(false);
-    let result = core_wd14(&image, &model, gt, gm, ct, cm, nu).map_err(|e| {
-        napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e))
-    })?;
+    let result = core_wd14(
+        &image,
+        &model,
+        gt,
+        gm,
+        ct,
+        cm,
+        nu,
+        drop_overlap.unwrap_or(false),
+    )
+    .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e)))?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -151,6 +161,7 @@ pub fn get_camie_tags(
     mode: Option<String>,
     thresholds: Option<HashMap<String, f64>>,
     no_underline: Option<bool>,
+    drop_overlap: Option<bool>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -162,9 +173,15 @@ pub fn get_camie_tags(
     let mode_str = mode.unwrap_or_else(|| "balanced".to_string());
     let nu = no_underline.unwrap_or(false);
     let thresh_map = thresholds.map(|m| m.into_iter().map(|(k, v)| (k, v as f32)).collect());
-    let result = core_camie(&image, &model, &mode_str, thresh_map, nu).map_err(|e| {
-        napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e))
-    })?;
+    let result = core_camie(
+        &image,
+        &model,
+        &mode_str,
+        thresh_map,
+        nu,
+        drop_overlap.unwrap_or(false),
+    )
+    .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e)))?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),

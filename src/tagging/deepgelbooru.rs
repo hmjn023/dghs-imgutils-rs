@@ -1,6 +1,7 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
 use crate::inference::create_onnx_session;
+use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array4;
@@ -181,6 +182,7 @@ pub fn get_deepgelbooru_tags(
     image: &DynamicImage,
     general_threshold: f32,
     character_threshold: f32,
+    drop_overlap: bool,
 ) -> Result<TagResult, TaggingError> {
     let model_path = hf_hub_download(REPO_ID, "model.onnx", None, None)?;
     let tags_path = hf_hub_download(REPO_ID, "tags.csv", None, None)?;
@@ -250,6 +252,12 @@ pub fn get_deepgelbooru_tags(
     character.sort_by(sort_fn);
     all_tags.sort_by(sort_fn);
 
+    if drop_overlap {
+        general = drop_overlap_tags(&general);
+        all_tags = general.iter().chain(character.iter()).cloned().collect();
+        all_tags.sort_by(sort_fn);
+    }
+
     let mut rest = HashMap::new();
     rest.insert("rating".to_string(), rating);
 
@@ -263,5 +271,5 @@ pub fn get_deepgelbooru_tags(
 }
 
 pub fn get_deepgelbooru_tags_simple(image: &DynamicImage) -> Result<TagResult, TaggingError> {
-    get_deepgelbooru_tags(image, 0.3, 0.3)
+    get_deepgelbooru_tags(image, 0.3, 0.3, false)
 }

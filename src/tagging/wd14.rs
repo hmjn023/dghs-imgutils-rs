@@ -1,6 +1,7 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
 use crate::inference::create_onnx_session;
+use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array4;
@@ -107,6 +108,7 @@ pub fn get_wd14_tags(
     character_threshold: f32,
     character_mcut_enabled: bool,
     no_underline: bool,
+    drop_overlap: bool,
 ) -> Result<TagResult, TaggingError> {
     let (repo_path, target_size) = lookup_model(model_name);
 
@@ -229,6 +231,14 @@ pub fn get_wd14_tags(
     character.sort_by(sort_fn);
     all_tags.sort_by(sort_fn);
 
+    // drop_overlap が有効な場合、general タグにのみ重複除去を適用
+    if drop_overlap {
+        general = drop_overlap_tags(&general);
+        // all_tags も再構築
+        all_tags = general.iter().chain(character.iter()).cloned().collect();
+        all_tags.sort_by(sort_fn);
+    }
+
     let mut rest = HashMap::new();
     rest.insert("rating".to_string(), rating);
 
@@ -242,5 +252,5 @@ pub fn get_wd14_tags(
 }
 
 pub fn get_wd14_tags_simple(image: &DynamicImage) -> Result<TagResult, TaggingError> {
-    get_wd14_tags(image, DEFAULT_MODEL, 0.35, false, 0.85, false, false)
+    get_wd14_tags(image, DEFAULT_MODEL, 0.35, false, 0.85, false, false, false)
 }

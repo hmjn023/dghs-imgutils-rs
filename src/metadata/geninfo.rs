@@ -162,6 +162,340 @@ fn extract_gif_comment(data: &[u8]) -> Option<String> {
     None
 }
 
+// ─── Write functions ───
+
+/// PNG ファイルの IEND チャンク直前に tEXt チャンクを挿入して保存します。
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `key` — テキストチャンクのキーワード (例: `"parameters"`)
+/// * `value` — 書き込むテキスト
+pub fn write_geninfo_png(
+    src_path: &str,
+    dst_path: &str,
+    key: &str,
+    value: &str,
+) -> std::io::Result<()> {
+    let data = std::fs::read(src_path)?;
+    let new_data = inject_png_text_chunk(&data, key, value)?;
+    std::fs::write(dst_path, &new_data)
+}
+
+/// PNG ファイルに `parameters` キーで生成情報を書き込みます。
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `geninfo` — 書き込む生成情報文字列
+pub fn write_geninfo_parameters(
+    src_path: &str,
+    dst_path: &str,
+    geninfo: &str,
+) -> std::io::Result<()> {
+    write_geninfo_png(src_path, dst_path, "parameters", geninfo)
+}
+
+/// JPEG/WebP ファイルに EXIF UserComment として生成情報を書き込みます。
+///
+/// EXIF UserComment タグ (0x9286) に Unicode エンコーディングで保存します。
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `geninfo` — 書き込む生成情報文字列
+pub fn write_geninfo_exif(src_path: &str, dst_path: &str, geninfo: &str) -> std::io::Result<()> {
+    let data = std::fs::read(src_path)?;
+    let new_data = inject_exif_user_comment(&data, geninfo)?;
+    std::fs::write(dst_path, &new_data)
+}
+
+/// GIF ファイルにコメント拡張ブロックとして生成情報を書き込みます。
+///
+/// * `src_path` — 元画像のファイルパス
+/// * `dst_path` — 保存先ファイルパス
+/// * `geninfo` — 書き込む生成情報文字列
+pub fn write_geninfo_gif(src_path: &str, dst_path: &str, geninfo: &str) -> std::io::Result<()> {
+    let data = std::fs::read(src_path)?;
+    let new_data = inject_gif_comment(&data, geninfo)?;
+    std::fs::write(dst_path, &new_data)
+}
+
+/// PNG バイト列の IEND チャンク直前に tEXt チャンクを挿入します。
+fn inject_png_text_chunk(data: &[u8], key: &str, value: &str) -> std::io::Result<Vec<u8>> {
+    if data.len() < 8 || &data[..8] != [137, 80, 78, 71, 13, 10, 26, 10] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Not a valid PNG file",
+        ));
+    }
+
+    // IEND チャンクの位置を探す
+    let mut iend_pos = None;
+    let mut pos = 8usize;
+    while pos + 8 <= data.len() {
+        let chunk_len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let chunk_type = &data[pos + 4..pos + 8];
+        if chunk_type == b"IEND" {
+            iend_pos = Some(pos);
+            break;
+        }
+        pos += 4 + 4 + chunk_len + 4; // length + type + data + crc
+    }
+
+    let iend_pos = iend_pos.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "IEND chunk not found")
+    })?;
+
+    // tEXt チャンクを構築: keyword + null separator + text
+    let mut chunk_data = Vec::new();
+    chunk_data.extend_from_slice(key.as_bytes());
+    chunk_data.push(0); // null separator
+    chunk_data.extend_from_slice(value.as_bytes());
+
+    let chunk_len = chunk_data.len() as u32;
+    let mut text_chunk = Vec::new();
+    text_chunk.extend_from_slice(&chunk_len.to_be_bytes());
+    text_chunk.extend_from_slice(b"tEXt");
+    text_chunk.extend_from_slice(&chunk_data);
+    // CRC32 for tEXt chunk (type + data)
+    let crc = crc32_ieee(&[b"tEXt".as_slice(), &chunk_data].concat());
+    text_chunk.extend_from_slice(&crc.to_be_bytes());
+
+    // IEND の前に挿入
+    let mut result = Vec::with_capacity(data.len() + text_chunk.len());
+    result.extend_from_slice(&data[..iend_pos]);
+    result.extend_from_slice(&text_chunk);
+    result.extend_from_slice(&data[iend_pos..]);
+
+    Ok(result)
+}
+
+/// JPEG バイト列に EXIF UserComment を挿入します。
+/// 簡易実装: APP1 セグメントを新規作成して挿入します。
+fn inject_exif_user_comment(data: &[u8], comment: &str) -> std::io::Result<Vec<u8>> {
+    // JPEG シグネチャ確認
+    if data.len() < 2 || data[0] != 0xFF || data[1] != 0xD8 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Not a valid JPEG file",
+        ));
+    }
+
+    // UserComment を Unicode (UTF-16LE) でエンコード
+    // EXIF UserComment: "UNICODE\0\0" プレフィックス + UTF-16LE バイト列
+    let mut comment_bytes = Vec::new();
+    comment_bytes.extend_from_slice(b"UNICODE\0\0");
+    for ch in comment.encode_utf16() {
+        comment_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+
+    // 簡易 EXIF APP1 セグメントを構築
+    let exif_data = build_exif_app1_with_user_comment(&comment_bytes)?;
+
+    // SOI (FF D8) の直後に APP1 を挿入
+    let mut result = Vec::with_capacity(data.len() + exif_data.len());
+    result.extend_from_slice(&data[..2]); // SOI
+    result.extend_from_slice(&exif_data);
+    // 既存の APP1 があればスキップ
+    let mut pos = 2;
+    while pos + 4 <= data.len() && data[pos] == 0xFF {
+        let marker = data[pos + 1];
+        if marker == 0xE1 {
+            // 既存 APP1 をスキップ
+            if pos + 4 <= data.len() {
+                let seg_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
+                pos += 2 + seg_len;
+                continue;
+            }
+        }
+        break;
+    }
+    result.extend_from_slice(&data[pos..]);
+
+    Ok(result)
+}
+
+/// 簡易 EXIF APP1 セグメントを構築します。
+fn build_exif_app1_with_user_comment(comment_bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    // 最小限の EXIF APP1 セグメント:
+    // APP1 marker (FF E1) + length + "Exif\0\0" + TIFF header + IFD0 + IFD(EXIF IFD with UserComment)
+    let mut exif_inner = Vec::new();
+
+    // "Exif\0\0" ヘッダー
+    exif_inner.extend_from_slice(b"Exif\0\0");
+
+    // TIFF ヘッダー (little-endian)
+    let tiff_start = exif_inner.len();
+    exif_inner.extend_from_slice(b"II"); // Little-endian
+    exif_inner.extend_from_slice(&42u16.to_le_bytes()); // Magic
+    exif_inner.extend_from_slice(&8u32.to_le_bytes()); // IFD0 offset
+
+    // IFD0: 1 エントリ (ExifTag IFD ポインタ)
+    let ifd0_offset = exif_inner.len() - tiff_start;
+    exif_inner.extend_from_slice(&1u16.to_le_bytes()); // entry count
+    // ExifTag (0x8769) pointing to Exif IFD
+    exif_inner.extend_from_slice(&0x8769u16.to_le_bytes()); // tag
+    exif_inner.extend_from_slice(&4u16.to_le_bytes()); // type: LONG
+    exif_inner.extend_from_slice(&1u32.to_le_bytes()); // count
+    let exif_ifd_offset = ifd0_offset as u32 + 2 + 12 * 1 + 4 + 40; // after IFD0 + next_ifd + padding
+    exif_inner.extend_from_slice(&exif_ifd_offset.to_le_bytes()); // value
+    exif_inner.extend_from_slice(&0u32.to_le_bytes()); // next IFD offset (none)
+
+    // パディング
+    exif_inner.extend_from_slice(&[0u8; 40]);
+
+    // Exif IFD: 1 エントリ (UserComment)
+    exif_inner.extend_from_slice(&1u16.to_le_bytes()); // entry count
+    let user_comment_tag: u16 = 0x9286;
+    let user_comment_type: u16 = 7; // UNDEFINED
+    let user_comment_count = comment_bytes.len() as u32;
+    let user_comment_value_offset = exif_inner.len() as u32 - tiff_start as u32 + 2 + 12 + 4 + 20;
+
+    exif_inner.extend_from_slice(&user_comment_tag.to_le_bytes());
+    exif_inner.extend_from_slice(&user_comment_type.to_le_bytes());
+    exif_inner.extend_from_slice(&user_comment_count.to_le_bytes());
+
+    if comment_bytes.len() <= 4 {
+        // 4 バイト以下なら直接値フィールドに格納
+        let mut val = [0u8; 4];
+        val[..comment_bytes.len()].copy_from_slice(comment_bytes);
+        exif_inner.extend_from_slice(&val);
+        exif_inner.extend_from_slice(&0u32.to_le_bytes()); // next IFD
+    } else {
+        exif_inner.extend_from_slice(&user_comment_value_offset.to_le_bytes());
+        exif_inner.extend_from_slice(&0u32.to_le_bytes()); // next IFD
+        // パディング
+        exif_inner.extend_from_slice(&[0u8; 20]);
+        // UserComment データ
+        exif_inner.extend_from_slice(comment_bytes);
+    }
+
+    // APP1 セグメント全体を構築
+    let app1_len = exif_inner.len() + 2; // +2 for length field itself
+    let mut app1 = Vec::new();
+    app1.extend_from_slice(&[0xFF, 0xE1]); // APP1 marker
+    app1.extend_from_slice(&(app1_len as u16).to_be_bytes());
+    app1.extend_from_slice(&exif_inner);
+
+    Ok(app1)
+}
+
+/// GIF バイト列にコメント拡張ブロックを挿入します。
+fn inject_gif_comment(data: &[u8], comment: &str) -> std::io::Result<Vec<u8>> {
+    if data.len() < 6 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Not a valid GIF file",
+        ));
+    }
+    let sig = &data[..6];
+    if sig != b"GIF87a" && sig != b"GIF89a" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Not a valid GIF file",
+        ));
+    }
+
+    // 既存のコメント拡張ブロックを除去
+    let cleaned = remove_gif_comments(data);
+
+    // コメント拡張ブロックを構築
+    let mut comment_block = Vec::new();
+    comment_block.push(0x21); // Extension introducer
+    comment_block.push(0xFE); // Comment extension label
+
+    // データサブブロック (最大 255 バイトずつ)
+    let comment_bytes = comment.as_bytes();
+    for chunk in comment_bytes.chunks(255) {
+        comment_block.push(chunk.len() as u8);
+        comment_block.extend_from_slice(chunk);
+    }
+    comment_block.push(0x00); // ブロック終端
+
+    // Logical Screen Descriptor の後に挿入
+    // LSD は 6 (シグネチャ) + 7 (LSD 固定) = 13 バイト目以降
+    // オプションの GCT (Global Color Table) をスキップ
+    let mut insert_pos = 6;
+    if data.len() >= 13 {
+        let packed = data[10];
+        let has_gct = packed & 0x80 != 0;
+        if has_gct {
+            let gct_size = 3 * (1 << ((packed & 0x07) + 1) as usize);
+            insert_pos = 13 + gct_size;
+        } else {
+            insert_pos = 13;
+        }
+    }
+
+    let insert_pos = insert_pos.min(cleaned.len());
+    let mut result = Vec::with_capacity(cleaned.len() + comment_block.len());
+    result.extend_from_slice(&cleaned[..insert_pos]);
+    result.extend_from_slice(&comment_block);
+    result.extend_from_slice(&cleaned[insert_pos..]);
+
+    Ok(result)
+}
+
+/// GIF バイト列から既存のコメント拡張ブロックを除去します。
+fn remove_gif_comments(data: &[u8]) -> Vec<u8> {
+    if data.len() < 6 {
+        return data.to_vec();
+    }
+    let mut result = Vec::with_capacity(data.len());
+    result.extend_from_slice(&data[..6]); // signature
+
+    let mut pos = 6;
+    while pos < data.len() {
+        if data[pos] == 0x21 && pos + 1 < data.len() && data[pos + 1] == 0xFE {
+            // コメント拡張ブロックをスキップ
+            pos += 2;
+            while pos < data.len() && data[pos] != 0x00 {
+                let block_size = data[pos] as usize;
+                pos += 1 + block_size;
+            }
+            if pos < data.len() {
+                pos += 1; // 終端 0x00 をスキップ
+            }
+        } else if data[pos] == 0x21 && pos + 1 < data.len() {
+            // その他の拡張ブロック
+            let start = pos;
+            pos += 2;
+            while pos < data.len() && data[pos] != 0x00 {
+                let block_size = data[pos] as usize;
+                pos += 1 + block_size;
+            }
+            if pos < data.len() {
+                pos += 1;
+            }
+            result.extend_from_slice(&data[start..pos]);
+        } else if data[pos] == 0x2C {
+            // Image Descriptor + 画像データ - 残り全部
+            result.extend_from_slice(&data[pos..]);
+            return result;
+        } else {
+            // その他のブロック ( Trailer 等 )
+            result.push(data[pos]);
+            pos += 1;
+        }
+    }
+    result
+}
+
+/// CRC32 (IEEE) を計算します。
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFFFFFF;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ 0xEDB88320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    crc ^ 0xFFFFFFFF
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
