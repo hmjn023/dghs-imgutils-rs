@@ -9,11 +9,10 @@ use once_cell::sync::Lazy;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
 use crate::inference::{InferenceError, create_onnx_session};
-use crate::ocr::constants::*;
 use crate::ocr::OcrError;
+use crate::ocr::constants::*;
 
-static DET_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(None));
+static DET_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
 
 pub type BBox = (i32, i32, i32, i32);
 
@@ -52,7 +51,11 @@ fn preprocess_det(image: &DynamicImage) -> Result<(Array4<f32>, u32, u32, f32, f
     let new_w = (orig_w as f32 * ratio).round() as u32;
     let new_h = (orig_h as f32 * ratio).round() as u32;
 
-    let resized = image.resize_exact(new_w.max(1), new_h.max(1), image::imageops::FilterType::Triangle);
+    let resized = image.resize_exact(
+        new_w.max(1),
+        new_h.max(1),
+        image::imageops::FilterType::Triangle,
+    );
 
     let align = 32u32;
     let padded_w = ((new_w + align - 1) / align) * align;

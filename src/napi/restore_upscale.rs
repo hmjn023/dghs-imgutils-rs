@@ -75,15 +75,13 @@ pub fn remove_adversarial_noise(
     })?;
     let b_iters = b_iters.unwrap_or(64).max(0) as usize;
     let g_iters = g_iters.unwrap_or(8).max(0) as usize;
-    let result =
-        crate::restore::adversarial::remove_adversarial_noise(&image, b_iters, g_iters).map_err(
-            |e| {
-                napi::Error::new(
-                    napi::Status::GenericFailure,
-                    format!("Adversarial noise removal failed: {}", e),
-                )
-            },
-        )?;
+    let result = crate::restore::adversarial::remove_adversarial_noise(&image, b_iters, g_iters)
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Adversarial noise removal failed: {}", e),
+            )
+        })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     result
         .write_to(&mut buf, image::ImageFormat::Png)

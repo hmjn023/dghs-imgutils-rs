@@ -8,14 +8,12 @@ use once_cell::sync::Lazy;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
 use crate::inference::{InferenceError, create_onnx_session};
+use crate::ocr::OcrError;
 use crate::ocr::constants::*;
 use crate::ocr::detect::{BBox, detect_text_with_paddleocr};
-use crate::ocr::OcrError;
 
-static REC_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(None));
-static CHAR_DICT: Lazy<Mutex<Option<Vec<String>>>> =
-    Lazy::new(|| Mutex::new(None));
+static REC_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
+static CHAR_DICT: Lazy<Mutex<Option<Vec<String>>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn ocr(image: &DynamicImage) -> Result<Vec<(BBox, String, f32)>, OcrError> {
     let _ = load_char_dict()?;
@@ -96,7 +94,8 @@ fn preprocess_rec(region: &DynamicImage) -> Result<Array4<f32>, OcrError> {
 
     let mut rgb = resized.to_rgb8();
     if target_w < REC_WIDTH {
-        let mut canvas = image::ImageBuffer::from_pixel(REC_WIDTH, REC_HEIGHT, image::Rgb([0, 0, 0]));
+        let mut canvas =
+            image::ImageBuffer::from_pixel(REC_WIDTH, REC_HEIGHT, image::Rgb([0, 0, 0]));
         image::imageops::overlay(&mut canvas, &rgb, 0, 0);
         rgb = canvas;
     }
@@ -107,16 +106,12 @@ fn preprocess_rec(region: &DynamicImage) -> Result<Array4<f32>, OcrError> {
     Ok(tensor)
 }
 
-fn ctc_decode(
-    shape: &[usize],
-    data: &[f32],
-    chars: &[String],
-) -> Result<String, OcrError> {
+fn ctc_decode(shape: &[usize], data: &[f32], chars: &[String]) -> Result<String, OcrError> {
     let blank_idx = 0usize;
 
     let seq_len = match shape.len() {
-        3 => shape[1],       // [1, seq_len, num_classes]
-        4 => shape[2],       // [1, num_classes, 1, seq_len] — PaddleOCR sometimes uses this
+        3 => shape[1], // [1, seq_len, num_classes]
+        4 => shape[2], // [1, num_classes, 1, seq_len] — PaddleOCR sometimes uses this
         _ => {
             return Err(OcrError::CharDict(format!(
                 "Unexpected recognition output shape: {:?}",
@@ -180,10 +175,7 @@ fn load_char_dict() -> Result<Vec<String>, OcrError> {
     let path = hf_hub_download(DET_REPO_ID, CHAR_DICT_PATH, None, None)?;
     let content = std::fs::read_to_string(path)?;
 
-    let chars: Vec<String> = content
-        .lines()
-        .map(|l| l.to_string())
-        .collect();
+    let chars: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
     if chars.is_empty() {
         return Err(OcrError::CharDict(

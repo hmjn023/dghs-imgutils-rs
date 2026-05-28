@@ -47,18 +47,15 @@ fn nafnet_process_rgb(
     let model_path = get_nafnet_model_path(model)?;
     let session = get_or_create_session(model_path)?;
 
-    let input_ = rgb_array
-        .to_owned()
-        .into_shape_with_order((1, 3, h, w))?;
+    let input_ = rgb_array.to_owned().into_shape_with_order((1, 3, h, w))?;
 
     let output_ = area_batch_run(
         &input_,
         |ix| {
-            let mut session = session.lock().map_err(|e| {
-                RestoreError::Shape(format!("Session lock poisoned: {e}"))
-            })?;
-            let tensor =
-                ort::value::Tensor::from_array(ix.clone()).map_err(RestoreError::Ort)?;
+            let mut session = session
+                .lock()
+                .map_err(|e| RestoreError::Shape(format!("Session lock poisoned: {e}")))?;
+            let tensor = ort::value::Tensor::from_array(ix.clone()).map_err(RestoreError::Ort)?;
             let outputs = session
                 .run(ort::inputs!["input" => tensor])
                 .map_err(RestoreError::Ort)?;
@@ -67,7 +64,12 @@ fn nafnet_process_rgb(
                 .map_err(RestoreError::Ort)?;
             let (out_shape, out_data) = raw_output;
             let out_shape_v: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
-            let (b, c, h, w) = (out_shape_v[0], out_shape_v[1], out_shape_v[2], out_shape_v[3]);
+            let (b, c, h, w) = (
+                out_shape_v[0],
+                out_shape_v[1],
+                out_shape_v[2],
+                out_shape_v[3],
+            );
             let out_data = out_data.to_owned();
             ndarray::Array4::from_shape_vec((b, c, h, w), out_data)
                 .map_err(|e| RestoreError::Shape(e.to_string()))
@@ -110,7 +112,13 @@ pub fn restore_with_nafnet(
         let rgb = input_array.slice(ndarray::s![0..3, .., ..]).to_owned();
         let alpha = input_array.slice(ndarray::s![3, .., ..]).to_owned();
 
-        let enhanced_rgb = nafnet_process_rgb(model, &rgb, DEFAULT_TILE_SIZE, DEFAULT_TILE_OVERLAP, DEFAULT_BATCH_SIZE)?;
+        let enhanced_rgb = nafnet_process_rgb(
+            model,
+            &rgb,
+            DEFAULT_TILE_SIZE,
+            DEFAULT_TILE_OVERLAP,
+            DEFAULT_BATCH_SIZE,
+        )?;
 
         // Process alpha through same model (stack as RGB, average channels)
         let mut alpha_stacked = Array3::<f32>::zeros((3, h, w));
@@ -139,14 +147,10 @@ pub fn restore_with_nafnet(
         let mut out_rgba = image::ImageBuffer::new(w as u32, h as u32);
         for y in 0..h {
             for x in 0..w {
-                let r =
-                    (enhanced_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let g =
-                    (enhanced_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let b =
-                    (enhanced_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let a =
-                    (enhanced_alpha[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let r = (enhanced_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let g = (enhanced_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let b = (enhanced_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let a = (enhanced_alpha[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
                 out_rgba.put_pixel(x as u32, y as u32, image::Rgba([r, g, b, a]));
             }
         }
@@ -164,12 +168,9 @@ pub fn restore_with_nafnet(
         let mut out_rgb = image::ImageBuffer::new(w as u32, h as u32);
         for y in 0..h {
             for x in 0..w {
-                let r =
-                    (enhanced_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let g =
-                    (enhanced_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let b =
-                    (enhanced_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let r = (enhanced_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let g = (enhanced_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let b = (enhanced_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
                 out_rgb.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
             }
         }

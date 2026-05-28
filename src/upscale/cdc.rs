@@ -38,9 +38,9 @@ static CDC_META_CACHE: Lazy<Mutex<HashMap<String, Arc<CdcModelMeta>>>> =
 fn get_cdc_model(model: &str) -> Result<(Arc<Mutex<ort::session::Session>>, usize), UpscaleError> {
     // メタデータキャッシュを確認
     {
-        let cache = CDC_META_CACHE.lock().map_err(|e| {
-            UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}"))
-        })?;
+        let cache = CDC_META_CACHE
+            .lock()
+            .map_err(|e| UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}")))?;
         if let Some(meta) = cache.get(model) {
             let model_path = hf_hub_download(
                 "deepghs/cdc_anime_onnx",
@@ -65,9 +65,9 @@ fn get_cdc_model(model: &str) -> Result<(Arc<Mutex<ort::session::Session>>, usiz
     let scale = {
         let input_data = Array4::<f32>::zeros((1, 3, CDC_INPUT_UNIT, CDC_INPUT_UNIT));
         let tensor = ort::value::Tensor::from_array(input_data)?;
-        let mut session_guard = session.lock().map_err(|e| {
-            UpscaleError::Shape(format!("Session lock poisoned: {e}"))
-        })?;
+        let mut session_guard = session
+            .lock()
+            .map_err(|e| UpscaleError::Shape(format!("Session lock poisoned: {e}")))?;
         let outputs = session_guard
             .run(ort::inputs!["input" => tensor])
             .map_err(|e| UpscaleError::Shape(format!("CDC warm-up failed: {e}")))?;
@@ -95,9 +95,9 @@ fn get_cdc_model(model: &str) -> Result<(Arc<Mutex<ort::session::Session>>, usiz
 
     // メタデータをキャッシュに保存
     {
-        let mut cache = CDC_META_CACHE.lock().map_err(|e| {
-            UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}"))
-        })?;
+        let mut cache = CDC_META_CACHE
+            .lock()
+            .map_err(|e| UpscaleError::Shape(format!("CDC meta cache lock poisoned: {e}")))?;
         cache.insert(model.to_string(), Arc::new(CdcModelMeta { scale }));
     }
 
@@ -116,9 +116,7 @@ fn cdc_upscale_rgb(
     let w = rgb_array.shape()[2];
     let (session, scale) = get_cdc_model(model)?;
 
-    let input_ = rgb_array
-        .to_owned()
-        .into_shape_with_order((1, 3, h, w))?;
+    let input_ = rgb_array.to_owned().into_shape_with_order((1, 3, h, w))?;
 
     let output_ = area_batch_run(
         &input_,
@@ -147,11 +145,10 @@ fn cdc_upscale_rgb(
                 ix.clone()
             };
 
-            let tensor =
-                ort::value::Tensor::from_array(padded).map_err(UpscaleError::Ort)?;
-            let mut session_guard = session.lock().map_err(|e| {
-                UpscaleError::Shape(format!("Session lock poisoned: {e}"))
-            })?;
+            let tensor = ort::value::Tensor::from_array(padded).map_err(UpscaleError::Ort)?;
+            let mut session_guard = session
+                .lock()
+                .map_err(|e| UpscaleError::Shape(format!("Session lock poisoned: {e}")))?;
             let outputs = session_guard
                 .run(ort::inputs!["input" => tensor])
                 .map_err(UpscaleError::Ort)?;
@@ -176,9 +173,11 @@ fn cdc_upscale_rgb(
             // Crop to actual scaled size
             let actual_h = scale * ih;
             let actual_w = scale * iw;
-            Ok::<_, UpscaleError>(reshaped
-                .slice(s![.., .., ..actual_h, ..actual_w])
-                .to_owned())
+            Ok::<_, UpscaleError>(
+                reshaped
+                    .slice(s![.., .., ..actual_h, ..actual_w])
+                    .to_owned(),
+            )
         },
         scale,
         tile_size,
@@ -231,7 +230,11 @@ pub fn upscale_with_cdc(
         let alpha = input_array.slice(ndarray::s![3, .., ..]).to_owned();
 
         let upscaled_rgb = cdc_upscale_rgb(model, &rgb, tile_size, tile_overlap, batch_size)?;
-        let (_, out_h, out_w) = (upscaled_rgb.shape()[0], upscaled_rgb.shape()[1], upscaled_rgb.shape()[2]);
+        let (_, out_h, out_w) = (
+            upscaled_rgb.shape()[0],
+            upscaled_rgb.shape()[1],
+            upscaled_rgb.shape()[2],
+        );
 
         let mut alpha_stacked = Array3::<f32>::zeros((3, h, w));
         for c in 0..3 {
@@ -254,14 +257,10 @@ pub fn upscale_with_cdc(
         let mut out_rgba = image::ImageBuffer::new(out_w as u32, out_h as u32);
         for y in 0..out_h {
             for x in 0..out_w {
-                let r =
-                    (upscaled_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let g =
-                    (upscaled_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let b =
-                    (upscaled_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let a =
-                    (upscaled_alpha[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let r = (upscaled_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let g = (upscaled_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let b = (upscaled_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let a = (upscaled_alpha[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
                 out_rgba.put_pixel(x as u32, y as u32, image::Rgba([r, g, b, a]));
             }
         }
@@ -269,17 +268,18 @@ pub fn upscale_with_cdc(
     } else {
         let rgb = input_array.slice(ndarray::s![0..3, .., ..]).to_owned();
         let upscaled_rgb = cdc_upscale_rgb(model, &rgb, tile_size, tile_overlap, batch_size)?;
-        let (_, out_h, out_w) = (upscaled_rgb.shape()[0], upscaled_rgb.shape()[1], upscaled_rgb.shape()[2]);
+        let (_, out_h, out_w) = (
+            upscaled_rgb.shape()[0],
+            upscaled_rgb.shape()[1],
+            upscaled_rgb.shape()[2],
+        );
 
         let mut out_rgb = image::ImageBuffer::new(out_w as u32, out_h as u32);
         for y in 0..out_h {
             for x in 0..out_w {
-                let r =
-                    (upscaled_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let g =
-                    (upscaled_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
-                let b =
-                    (upscaled_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let r = (upscaled_rgb[[0, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let g = (upscaled_rgb[[1, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let b = (upscaled_rgb[[2, y, x]].clamp(0.0, 1.0) * 255.0).round() as u8;
                 out_rgb.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
             }
         }

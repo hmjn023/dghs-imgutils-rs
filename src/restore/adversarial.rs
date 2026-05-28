@@ -87,7 +87,12 @@ fn box_filter_2d(arr: &Array2<f32>, radius: usize) -> Array2<f32> {
 /// Guided filter applied to each channel independently.
 ///
 /// Reference: K. He, J. Sun, X. Tang, "Guided Image Filtering", ECCV 2010.
-fn guided_filter_channel(guide: &Array2<f32>, input: &Array2<f32>, radius: usize, eps: f32) -> Array2<f32> {
+fn guided_filter_channel(
+    guide: &Array2<f32>,
+    input: &Array2<f32>,
+    radius: usize,
+    eps: f32,
+) -> Array2<f32> {
     let mean_i = box_filter_2d(guide, radius);
     let mean_p = box_filter_2d(input, radius);
     let mean_ii = box_filter_2d(&(guide * guide), radius);
@@ -106,7 +111,12 @@ fn guided_filter_channel(guide: &Array2<f32>, input: &Array2<f32>, radius: usize
 }
 
 /// Guided filter for multi-channel image [C, H, W].
-fn guided_filter_color(guide: &Array3<f32>, input: &Array3<f32>, radius: usize, eps: f32) -> Array3<f32> {
+fn guided_filter_color(
+    guide: &Array3<f32>,
+    input: &Array3<f32>,
+    radius: usize,
+    eps: f32,
+) -> Array3<f32> {
     let channels = guide.shape()[0];
     let h = guide.shape()[1];
     let w = guide.shape()[2];
@@ -121,7 +131,12 @@ fn guided_filter_color(guide: &Array3<f32>, input: &Array3<f32>, radius: usize, 
 }
 
 /// Simple bilateral filter for an RGB image array [3, H, W].
-fn bilateral_filter_color(img: &Array3<f32>, diameter: usize, sigma_color: f32, sigma_space: f32) -> Array3<f32> {
+fn bilateral_filter_color(
+    img: &Array3<f32>,
+    diameter: usize,
+    sigma_color: f32,
+    sigma_space: f32,
+) -> Array3<f32> {
     let (h, w) = (img.shape()[1], img.shape()[2]);
     let half = (diameter / 2) as isize;
     let mut result = img.to_owned();

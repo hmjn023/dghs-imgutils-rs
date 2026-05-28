@@ -65,10 +65,7 @@ pub fn ocr(path: String) -> napi::Result<Vec<NapiOcrResult>> {
     })?;
 
     let results = core_ocr(&image).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("OCR failed: {}", e),
-        )
+        napi::Error::new(napi::Status::GenericFailure, format!("OCR failed: {}", e))
     })?;
 
     Ok(results.into_iter().map(NapiOcrResult::from).collect())

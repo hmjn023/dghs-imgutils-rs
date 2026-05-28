@@ -73,7 +73,9 @@ mod tests {
         // 基準データの読み込み
         let input_path = "tests/precision/baseline_input.npy";
         if !std::path::Path::new(input_path).exists() {
-            eprintln!("Baseline data not found. Run: cd tests/precision && python generate_baseline.py");
+            eprintln!(
+                "Baseline data not found. Run: cd tests/precision && python generate_baseline.py"
+            );
             return;
         }
 
@@ -122,9 +124,8 @@ mod tests {
         let arr = Array3::<f32>::from_elem((3, 16, 16), 128.0);
         let img = array_to_dynamic_image(&arr);
 
-        let result =
-            dghs_imgutils_rs::restore::adversarial::remove_adversarial_noise(&img, 1, 0)
-                .expect("Adversarial noise removal failed");
+        let result = dghs_imgutils_rs::restore::adversarial::remove_adversarial_noise(&img, 1, 0)
+            .expect("Adversarial noise removal failed");
 
         let result_arr = dynamic_image_to_array(&result);
 

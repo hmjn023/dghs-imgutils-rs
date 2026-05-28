@@ -94,7 +94,9 @@ print(f"Python avg: {elapsed/n_runs*1000:.2f}ms")
         Err(e) => println!("Python benchmark skipped: {}", e),
     }
     println!("Rust NafNet benchmark requires model download. Skipping automated run.");
-    println!("Run manually after downloading: cargo test --release -- --ignored --nocapture nafnet");
+    println!(
+        "Run manually after downloading: cargo test --release -- --ignored --nocapture nafnet"
+    );
 }
 
 #[test]

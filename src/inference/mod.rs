@@ -124,12 +124,14 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
 /// # 引数
 ///
 /// * `model_path` - ONNX モデルファイルへのパス
-pub fn get_or_create_session<P: AsRef<Path>>(model_path: P) -> Result<Arc<Mutex<Session>>, InferenceError> {
+pub fn get_or_create_session<P: AsRef<Path>>(
+    model_path: P,
+) -> Result<Arc<Mutex<Session>>, InferenceError> {
     let path_str = model_path.as_ref().to_string_lossy().to_string();
 
-    let mut cache = SESSION_CACHE.lock().map_err(|e| {
-        InferenceError::Initialization(format!("Session cache lock poisoned: {e}"))
-    })?;
+    let mut cache = SESSION_CACHE
+        .lock()
+        .map_err(|e| InferenceError::Initialization(format!("Session cache lock poisoned: {e}")))?;
 
     if let Some(session) = cache.get(&path_str) {
         return Ok(Arc::clone(session));

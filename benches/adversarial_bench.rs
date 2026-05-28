@@ -1,7 +1,9 @@
 use std::time::Instant;
 
+use dghs_imgutils_rs::restore::adversarial::{
+    AdversarialNoiseParams, remove_adversarial_noise, remove_adversarial_noise_with_params,
+};
 use image::DynamicImage;
-use dghs_imgutils_rs::restore::adversarial::{remove_adversarial_noise, remove_adversarial_noise_with_params, AdversarialNoiseParams};
 
 fn main() {
     println!("=== Adversarial Noise Removal Benchmark ===\n");
@@ -11,7 +13,9 @@ fn main() {
 
     for (w, h) in sizes {
         let img = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
-            w, h, image::Rgb([128u8, 128, 128]),
+            w,
+            h,
+            image::Rgb([128u8, 128, 128]),
         ));
 
         // ウォームアップ
