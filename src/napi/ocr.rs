@@ -72,7 +72,7 @@ pub fn ocr(path: String) -> napi::Result<Vec<NapiOcrResult>> {
 }
 
 #[napi]
-pub fn detect_text(path: String) -> napi::Result<Vec<NapiBBoxResult>> {
+pub fn detect_text_ocr(path: String) -> napi::Result<Vec<NapiBBoxResult>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
