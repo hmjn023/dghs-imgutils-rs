@@ -114,6 +114,7 @@ pub fn get_mldanbooru_tags(
         rest: HashMap::new(),
         tag: general,
         ips: Vec::new(),
+        ips_mapping: HashMap::new(),
     })
 }
 

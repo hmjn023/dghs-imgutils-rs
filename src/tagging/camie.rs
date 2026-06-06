@@ -350,6 +350,7 @@ pub fn get_camie_tags(
         rest,
         tag: all_tags,
         ips: Vec::new(),
+        ips_mapping: HashMap::new(),
     })
 }
 
