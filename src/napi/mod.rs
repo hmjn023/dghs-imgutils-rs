@@ -7,6 +7,43 @@ use crate::tagging::pixai::get_pixai_tags as core_get_pixai_tags;
 use image::DynamicImage;
 use napi_derive::napi;
 use std::collections::HashMap;
+use std::io::{Read, Seek};
+
+/// 画像ファイルを開く。自動フォーマット判別が失敗した場合は、マジックバイトから実際のフォーマットを推定して再試行する。
+fn open_image_robust(path: &str) -> image::ImageResult<DynamicImage> {
+    // まず標準の自動判別を試行
+    match image::open(path) {
+        Ok(img) => Ok(img),
+        Err(first_err) => {
+            // マジックバイトからフォーマットを推定して再試行
+            let mut file = std::fs::File::open(path).map_err(|e| {
+                image::ImageError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Failed to open file: {e}"),
+                ))
+            })?;
+            let mut magic = [0u8; 8];
+            let n = file.read(&mut magic).map_err(image::ImageError::IoError)?;
+            if n < 4 {
+                return Err(first_err);
+            }
+            let format = match &magic[..n] {
+                [0xFF, 0xD8, 0xFF, ..] => image::ImageFormat::Jpeg,
+                [0x89, 0x50, 0x4E, 0x47, ..] => image::ImageFormat::Png,
+                [0x47, 0x49, 0x46, ..] => image::ImageFormat::Gif,
+                [0x52, 0x49, 0x46, 0x46, _, _, _, _, 0x57, 0x45, 0x42, 0x50] => {
+                    image::ImageFormat::WebP
+                }
+                [0x42, 0x4D, ..] => image::ImageFormat::Bmp,
+                _ => return Err(first_err),
+            };
+            file.seek(std::io::SeekFrom::Start(0)).map_err(image::ImageError::IoError)?;
+            let mut reader = image::ImageReader::new(std::io::BufReader::new(file));
+            reader.set_format(format);
+            reader.decode()
+        }
+    }
+}
 
 /// PixAI Tagger の予測結果を JS/TS 側で表現する構造体
 #[napi(object)]
@@ -33,7 +70,7 @@ pub fn get_pixai_tags(
     thresholds: Option<HashMap<String, f64>>,
 ) -> napi::Result<PixaiTagResult> {
     // 1. パスから画像を開く (Rust側で透過PNG白ブレンド含む前処理が自動適用されます)
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -82,7 +119,7 @@ pub fn get_pixai_tags(
 /// * `model_name`: CCIPモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
 #[napi]
 pub fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Result<Vec<f64>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -320,7 +357,7 @@ pub fn load_image_from_file(
     path: String,
     force_background: Option<Vec<f64>>,
 ) -> napi::Result<Vec<u8>> {
-    let img = image::open(&path).map_err(|e| {
+    let img = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image: {e}"),
@@ -371,7 +408,7 @@ pub fn rgb_encode(
     order: Option<String>,
     use_float: Option<bool>,
 ) -> napi::Result<Vec<f64>> {
-    let img = image::open(&path).map_err(|e| {
+    let img = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image: {e}"),
