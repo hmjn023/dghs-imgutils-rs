@@ -248,6 +248,7 @@ pub fn get_wd14_tags(
         rest,
         tag: all_tags,
         ips: Vec::new(),
+        ips_mapping: HashMap::new(),
     })
 }
 

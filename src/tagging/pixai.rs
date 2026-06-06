@@ -180,8 +180,10 @@ pub fn get_pixai_tags(
 
     // 8. 原作 IP (著作権) マッピング
     let mut ips_counts = HashMap::new();
-    for (tag_name, _) in &all_tags {
+    let mut ips_mapping = HashMap::new();
+    for (tag_name, _) in &character_tags {
         if let Some(ips_list) = character_to_ips.get(tag_name) {
+            ips_mapping.insert(tag_name.clone(), ips_list.clone());
             for ip in ips_list {
                 *ips_counts.entry(ip.clone()).or_insert(0) += 1;
             }
@@ -201,5 +203,6 @@ pub fn get_pixai_tags(
         rest: rest_tags,
         tag: all_tags,
         ips: sorted_ips,
+        ips_mapping,
     })
 }

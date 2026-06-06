@@ -75,4 +75,7 @@ pub struct TagResult {
     ///
     /// 登場回数の降順（同じ回数の場合は名前の昇順）でソートされています。
     pub ips: Vec<String>,
+
+    /// 検出されたキャラクター名とその IP のマッピング。
+    pub ips_mapping: HashMap<String, Vec<String>>,
 }

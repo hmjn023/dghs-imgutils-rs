@@ -267,6 +267,7 @@ pub fn get_deepgelbooru_tags(
         rest,
         tag: all_tags,
         ips: Vec::new(),
+        ips_mapping: HashMap::new(),
     })
 }
 

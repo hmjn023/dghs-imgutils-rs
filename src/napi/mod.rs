@@ -15,6 +15,10 @@ pub struct PixaiTagResult {
     pub general: HashMap<String, f64>,
     /// キャラクター名タグ（遠坂凛, ニェンなど）とそれぞれの確信度スコア
     pub character: HashMap<String, f64>,
+    /// 検出されたキャラクターからマッピングされた原作 IP (著作物名) のリスト
+    pub ips: Vec<String>,
+    /// 検出されたキャラクター名とその IP のマッピング
+    pub ips_mapping: HashMap<String, Vec<String>>,
 }
 
 /// 指定した画像ファイルパスから PixAI Tagger モデルを用いてアニメ調イラストのタグとその確信度スコアを予測します。
@@ -64,7 +68,12 @@ pub fn get_pixai_tags(
         .map(|(k, v)| (k, v as f64))
         .collect();
 
-    Ok(PixaiTagResult { general, character })
+    Ok(PixaiTagResult {
+        general,
+        character,
+        ips: result.ips,
+        ips_mapping: result.ips_mapping,
+    })
 }
 
 /// 指定した画像ファイルパスから CCIP モデルを用いてキャラクター対照学習特徴量（768次元ベクトル）を抽出します。
