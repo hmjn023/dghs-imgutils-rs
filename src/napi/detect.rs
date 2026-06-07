@@ -19,6 +19,7 @@ use crate::detect::similarity::{
 };
 use crate::detect::text::detect_text as core_detect_text;
 use crate::detect::visual::detection_visualize as core_detection_visualize;
+use crate::napi::open_image_robust;
 use napi_derive::napi;
 use ndarray::Array2;
 
@@ -93,7 +94,7 @@ pub fn detect_faces(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -124,7 +125,7 @@ pub fn detect_heads(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -155,7 +156,7 @@ pub fn detect_person(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -186,7 +187,7 @@ pub fn detect_censors(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -216,7 +217,7 @@ pub fn detect_with_booru_yolo(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -245,7 +246,7 @@ pub fn detect_with_nudenet(
     iou_threshold: Option<f64>,
     score_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -274,7 +275,7 @@ pub fn detect_text(
     threshold: Option<f64>,
     max_area_size: Option<i32>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -304,7 +305,7 @@ pub fn detect_eyes(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -335,7 +336,7 @@ pub fn detect_halfbody(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -366,7 +367,7 @@ pub fn detect_hands(
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
 ) -> napi::Result<Vec<NapiDetection>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
@@ -422,7 +423,7 @@ pub fn detection_visualize(
     mask_alpha: Option<f64>,
     no_label: Option<bool>,
 ) -> napi::Result<Vec<u8>> {
-    let image = image::open(&path).map_err(|e| {
+    let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("Failed to open image at {}: {}", path, e),
