@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek};
 
 /// 画像ファイルを開く。自動フォーマット判別が失敗した場合は、マジックバイトから実際のフォーマットを推定して再試行する。
-fn open_image_robust(path: &str) -> image::ImageResult<DynamicImage> {
+pub fn open_image_robust(path: &str) -> image::ImageResult<DynamicImage> {
     // まず標準の自動判別を試行
     match image::open(path) {
         Ok(img) => Ok(img),
