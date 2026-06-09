@@ -23,7 +23,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/dghs-imgutils-rs.git
+git clone https://github.com/hmjn023/dghs-imgutils-rs.git
 cd dghs-imgutils-rs
 
 # Install tool versions (if using mise)
