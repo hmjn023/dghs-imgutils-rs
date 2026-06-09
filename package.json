@@ -17,7 +17,7 @@
   "scripts": {
     "build": "napi build --platform --dts index.d.ts --release --cargo-flags=--lib",
     "build:debug": "napi build --platform --dts index.d.ts --cargo-flags=--lib",
-    "postinstall": "napi build --platform --dts index.d.ts --release --cargo-flags=--lib"
+    "postinstall": "npx napi build --platform --dts index.d.ts --release --cargo-flags=--lib"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
