@@ -23,7 +23,7 @@
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/your-org/dghs-imgutils-rs.git
+git clone https://github.com/hmjn023/dghs-imgutils-rs.git
 cd dghs-imgutils-rs
 
 # ツールバージョンのインストール（mise 使用時）
