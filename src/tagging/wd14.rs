@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
@@ -123,22 +123,29 @@ pub fn get_wd14_tags(
 
     let input_tensor = prepare_image_for_tagging(image, target_size);
 
-    let mut session = create_onnx_session(&model_path)?;
-    let out0_name = session.outputs()[0].name().to_string();
-    let out1_name = session.outputs()[1].name().to_string();
-    let outputs = session.run(ort::inputs![
-        "input" => ort::value::Tensor::from_array(input_tensor.clone())?
-    ])?;
+    let prediction = {
+        let session_arc = get_or_create_session(&model_path)?;
+        let mut session = session_arc.lock().map_err(|e| {
+            crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+        })?;
+        let out0_name = session.outputs()[0].name().to_string();
+        let out1_name = session.outputs()[1].name().to_string();
+        let outputs = session.run(ort::inputs![
+            "input" => ort::value::Tensor::from_array(input_tensor.clone())?
+        ])?;
 
-    let pred_value = outputs.get(out0_name.as_str()).ok_or_else(|| {
-        crate::inference::InferenceError::InvalidShape("No prediction output".to_string())
-    })?;
-    let (_, pred_raw) = pred_value.try_extract_tensor::<f32>()?;
+        let pred_value = outputs.get(out0_name.as_str()).ok_or_else(|| {
+            crate::inference::InferenceError::InvalidShape("No prediction output".to_string())
+        })?;
+        let (_, pred_raw) = pred_value.try_extract_tensor::<f32>()?;
 
-    let _emb_value = outputs.get(out1_name.as_str()).ok_or_else(|| {
-        crate::inference::InferenceError::InvalidShape("No embedding output".to_string())
-    })?;
-    let (_emb_shape, _embedding) = _emb_value.try_extract_tensor::<f32>()?;
+        let _emb_value = outputs.get(out1_name.as_str()).ok_or_else(|| {
+            crate::inference::InferenceError::InvalidShape("No embedding output".to_string())
+        })?;
+        let (_emb_shape, _embedding) = _emb_value.try_extract_tensor::<f32>()?;
+
+        pred_raw.to_vec()
+    };
 
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tag_defs = Vec::new();
@@ -151,7 +158,6 @@ pub fn get_wd14_tags(
     }
 
     let n = tag_defs.len();
-    let prediction: Vec<f32> = pred_raw.iter().copied().collect();
 
     if prediction.len() != n {
         return Err(TaggingError::InvalidArgument(format!(

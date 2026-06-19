@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
@@ -214,16 +214,6 @@ pub fn get_camie_tags(
     let rgb = force_image_background(image, [255, 255, 255]);
     let input_tensor = apply_preprocess_to_chw(&rgb, &preproc.stages);
 
-    let mut session = create_onnx_session(&model_path)?;
-    let output_names: Vec<String> = session
-        .outputs()
-        .iter()
-        .map(|o| o.name().to_string())
-        .collect();
-    let has_refined = output_names
-        .iter()
-        .any(|n| n == "embedding" || n == "refined/embedding");
-
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tag_defs = Vec::new();
     for result in rdr.deserialize() {
@@ -234,38 +224,53 @@ pub fn get_camie_tags(
         tag_defs.push(record);
     }
 
-    let (pred, _embedding) = if has_refined {
-        let outputs = session.run(ort::inputs![
-            "input" => ort::value::Tensor::from_array(input_tensor.clone())?
-        ])?;
+    let (pred, _embedding) = {
+        let session_arc = get_or_create_session(&model_path)?;
+        let mut session = session_arc.lock().map_err(|e| {
+            crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+        })?;
+        let output_names: Vec<String> = session
+            .outputs()
+            .iter()
+            .map(|o| o.name().to_string())
+            .collect();
+        let has_refined = output_names
+            .iter()
+            .any(|n| n == "embedding" || n == "refined/embedding");
 
-        let refined_pred = outputs
-            .get("output")
-            .or_else(|| outputs.get("refined/output"))
-            .ok_or_else(|| TaggingError::InvalidArgument("No refined output found".to_string()))?;
-        let (_shape, refined_pred_data) = refined_pred.try_extract_tensor::<f32>()?;
+        if has_refined {
+            let outputs = session.run(ort::inputs![
+                "input" => ort::value::Tensor::from_array(input_tensor.clone())?
+            ])?;
 
-        let refined_emb = outputs
-            .get("embedding")
-            .or_else(|| outputs.get("refined/embedding"))
-            .ok_or_else(|| {
-                TaggingError::InvalidArgument("No refined embedding found".to_string())
-            })?;
-        let (_emb_shape, refined_emb_data) = refined_emb.try_extract_tensor::<f32>()?;
+            let refined_pred = outputs
+                .get("output")
+                .or_else(|| outputs.get("refined/output"))
+                .ok_or_else(|| TaggingError::InvalidArgument("No refined output found".to_string()))?;
+            let (_shape, refined_pred_data) = refined_pred.try_extract_tensor::<f32>()?;
 
-        (refined_pred_data.to_vec(), Some(refined_emb_data.to_vec()))
-    } else {
-        let outputs = session.run(ort::inputs![
-            "input" => ort::value::Tensor::from_array(input_tensor.clone())?
-        ])?;
+            let refined_emb = outputs
+                .get("embedding")
+                .or_else(|| outputs.get("refined/embedding"))
+                .ok_or_else(|| {
+                    TaggingError::InvalidArgument("No refined embedding found".to_string())
+                })?;
+            let (_emb_shape, refined_emb_data) = refined_emb.try_extract_tensor::<f32>()?;
 
-        let init_pred = outputs
-            .get("output")
-            .or_else(|| outputs.get("initial/output"))
-            .ok_or_else(|| TaggingError::InvalidArgument("No initial output found".to_string()))?;
-        let (_shape, init_pred_data) = init_pred.try_extract_tensor::<f32>()?;
+            (refined_pred_data.to_vec(), Some(refined_emb_data.to_vec()))
+        } else {
+            let outputs = session.run(ort::inputs![
+                "input" => ort::value::Tensor::from_array(input_tensor.clone())?
+            ])?;
 
-        (init_pred_data.to_vec(), None)
+            let init_pred = outputs
+                .get("output")
+                .or_else(|| outputs.get("initial/output"))
+                .ok_or_else(|| TaggingError::InvalidArgument("No initial output found".to_string()))?;
+            let (_shape, init_pred_data) = init_pred.try_extract_tensor::<f32>()?;
+
+            (init_pred_data.to_vec(), None)
+        }
     };
 
     let n = tag_defs.len();

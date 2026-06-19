@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
@@ -193,15 +193,21 @@ pub fn get_deepgelbooru_tags(
 
     let input_tensor = apply_preprocessing(image, &preproc.stages);
 
-    let mut session = create_onnx_session(&model_path)?;
-    let output_name = session.outputs()[0].name().to_string();
-    let outputs = session.run(ort::inputs![
-        "input" => ort::value::Tensor::from_array(input_tensor.clone())?
-    ])?;
-    let output_value = outputs.get(output_name.as_str()).ok_or_else(|| {
-        crate::inference::InferenceError::InvalidShape("No output tensor found".to_string())
-    })?;
-    let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+    let prediction = {
+        let session_arc = get_or_create_session(&model_path)?;
+        let mut session = session_arc.lock().map_err(|e| {
+            crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+        })?;
+        let output_name = session.outputs()[0].name().to_string();
+        let outputs = session.run(ort::inputs![
+            "input" => ort::value::Tensor::from_array(input_tensor.clone())?
+        ])?;
+        let output_value = outputs.get(output_name.as_str()).ok_or_else(|| {
+            crate::inference::InferenceError::InvalidShape("No output tensor found".to_string())
+        })?;
+        let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+        prediction.to_vec()
+    };
 
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tags_def: Vec<TagRecord> = Vec::new();

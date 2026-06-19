@@ -2,7 +2,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, run_onnx_session};
+use crate::inference::{get_or_create_session, run_onnx_session};
 use crate::metrics::CcipError;
 
 use image::DynamicImage;
@@ -83,7 +83,10 @@ pub fn ccip_batch_extract_features(
             .assign(&chw.slice(ndarray::s![0, .., .., ..]));
     }
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let outputs = run_onnx_session(&mut session, "input", &batch_tensor)?;
 
     let output_value = outputs.get("output").ok_or_else(|| {
@@ -180,7 +183,10 @@ pub fn ccip_batch_differences(
         }
     }
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let input_value = ort::value::Tensor::from_array(input_tensor)?;
     let inputs = ort::inputs!["input" => input_value];
     let outputs = session.run(inputs)?;
