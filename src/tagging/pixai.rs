@@ -2,7 +2,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, run_onnx_session};
+use crate::inference::{get_or_create_session, run_onnx_session};
 use crate::tagging::{TagResult, TaggingError};
 
 use image::DynamicImage;
@@ -63,7 +63,10 @@ pub fn get_pixai_tags(
     // mean: 0.5, std: 0.5 で [-1.0, 1.0] に正規化して CHW テンソルを構築
     let input_tensor = to_ndarray_chw(&resized, &[0.5, 0.5, 0.5], &[0.5, 0.5, 0.5])?;
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let outputs = run_onnx_session(&mut session, "input", &input_tensor)?;
 
     // "prediction" 出力テンソルを名前で明示的に解決して取り出します

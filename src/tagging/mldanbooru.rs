@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array4;
@@ -60,7 +60,10 @@ pub fn get_mldanbooru_tags(
         array[[0, 2, y as usize, x as usize]] = pixel[2] as f32 / 255.0;
     }
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let output_name = session.outputs()[0].name().to_string();
     let outputs = session.run(ort::inputs![
         "input" => ort::value::Tensor::from_array(array.clone())?

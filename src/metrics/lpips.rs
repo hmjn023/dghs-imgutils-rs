@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{create_onnx_session, run_onnx_session};
+use crate::inference::{get_or_create_session, run_onnx_session};
 
 use image::DynamicImage;
 use ndarray::Array4;
@@ -53,7 +53,10 @@ pub fn lpips_extract_feature(
     image: &DynamicImage,
 ) -> Result<LpipsFeatures, crate::metrics::CcipError> {
     let model_path = hf_hub_download(REPO_ID, FEATURE_FILENAME, Some("model"), None)?;
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let tensor = preprocess(image)?;
     let outputs = run_onnx_session(&mut session, "input", &tensor)?;
 
@@ -80,7 +83,10 @@ pub fn lpips_difference(
     f2: &LpipsFeatures,
 ) -> Result<f32, crate::metrics::CcipError> {
     let model_path = hf_hub_download(REPO_ID, DIFF_FILENAME, Some("model"), None)?;
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
 
     let tx0 = ort::value::Tensor::from_array(f1.0.clone())?;
     let tx1 = ort::value::Tensor::from_array(f1.1.clone())?;

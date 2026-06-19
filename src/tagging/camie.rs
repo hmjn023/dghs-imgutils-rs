@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
@@ -214,7 +214,10 @@ pub fn get_camie_tags(
     let rgb = force_image_background(image, [255, 255, 255]);
     let input_tensor = apply_preprocess_to_chw(&rgb, &preproc.stages);
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let output_names: Vec<String> = session
         .outputs()
         .iter()

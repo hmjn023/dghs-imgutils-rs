@@ -1,6 +1,6 @@
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
 use image::{DynamicImage, GenericImageView};
@@ -123,7 +123,10 @@ pub fn get_wd14_tags(
 
     let input_tensor = prepare_image_for_tagging(image, target_size);
 
-    let mut session = create_onnx_session(&model_path)?;
+    let session_arc = get_or_create_session(&model_path)?;
+    let mut session = session_arc.lock().map_err(|e| {
+        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+    })?;
     let out0_name = session.outputs()[0].name().to_string();
     let out1_name = session.outputs()[1].name().to_string();
     let outputs = session.run(ort::inputs![
