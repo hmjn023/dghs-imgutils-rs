@@ -52,18 +52,21 @@ pub fn get_deepdanbooru_tags(
         array[[0, ay, ax, 2]] = pixel[2] as f32 / 255.0;
     }
 
-    let session_arc = get_or_create_session(&model_path)?;
-    let mut session = session_arc.lock().map_err(|e| {
-        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
-    })?;
-    let output_name = session.outputs()[0].name().to_string();
-    let outputs = session.run(ort::inputs![
-        "input" => ort::value::Tensor::from_array(array.clone())?
-    ])?;
-    let output_value = outputs.get(output_name.as_str()).ok_or_else(|| {
-        crate::inference::InferenceError::InvalidShape("No output tensor found".to_string())
-    })?;
-    let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+    let prediction = {
+        let session_arc = get_or_create_session(&model_path)?;
+        let mut session = session_arc.lock().map_err(|e| {
+            crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+        })?;
+        let output_name = session.outputs()[0].name().to_string();
+        let outputs = session.run(ort::inputs![
+            "input" => ort::value::Tensor::from_array(array.clone())?
+        ])?;
+        let output_value = outputs.get(output_name.as_str()).ok_or_else(|| {
+            crate::inference::InferenceError::InvalidShape("No output tensor found".to_string())
+        })?;
+        let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+        prediction.to_vec()
+    };
 
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tags_definition = Vec::new();

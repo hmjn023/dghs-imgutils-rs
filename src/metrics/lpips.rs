@@ -53,11 +53,11 @@ pub fn lpips_extract_feature(
     image: &DynamicImage,
 ) -> Result<LpipsFeatures, crate::metrics::CcipError> {
     let model_path = hf_hub_download(REPO_ID, FEATURE_FILENAME, Some("model"), None)?;
+    let tensor = preprocess(image)?;
     let session_arc = get_or_create_session(&model_path)?;
     let mut session = session_arc.lock().map_err(|e| {
         crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
     })?;
-    let tensor = preprocess(image)?;
     let outputs = run_onnx_session(&mut session, "input", &tensor)?;
 
     let feat_names = ["feat_0", "feat_1", "feat_2", "feat_3", "feat_4"];

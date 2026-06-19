@@ -63,20 +63,23 @@ pub fn get_pixai_tags(
     // mean: 0.5, std: 0.5 で [-1.0, 1.0] に正規化して CHW テンソルを構築
     let input_tensor = to_ndarray_chw(&resized, &[0.5, 0.5, 0.5], &[0.5, 0.5, 0.5])?;
 
-    let session_arc = get_or_create_session(&model_path)?;
-    let mut session = session_arc.lock().map_err(|e| {
-        crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
-    })?;
-    let outputs = run_onnx_session(&mut session, "input", &input_tensor)?;
+    let prediction = {
+        let session_arc = get_or_create_session(&model_path)?;
+        let mut session = session_arc.lock().map_err(|e| {
+            crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
+        })?;
+        let outputs = run_onnx_session(&mut session, "input", &input_tensor)?;
 
-    // "prediction" 出力テンソルを名前で明示的に解決して取り出します
-    let output_value = outputs.get("prediction").ok_or_else(|| {
-        crate::inference::InferenceError::InvalidShape(
-            "No prediction output tensor found".to_string(),
-        )
-    })?;
+        // "prediction" 出力テンソルを名前で明示的に解決して取り出します
+        let output_value = outputs.get("prediction").ok_or_else(|| {
+            crate::inference::InferenceError::InvalidShape(
+                "No prediction output tensor found".to_string(),
+            )
+        })?;
 
-    let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+        let (_shape, prediction) = output_value.try_extract_tensor::<f32>()?;
+        prediction.to_vec()
+    };
 
     // 4. selected_tags.csv のロードとパース
     let mut rdr = csv::Reader::from_path(&tags_csv_path)?;
