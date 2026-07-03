@@ -91,7 +91,7 @@ pub fn segment_with_isnetis(
 /// * `path`: 元画像のファイルパス
 /// * `scale`: 推論時のサイズ（オプション）
 #[napi]
-pub fn segment_rgba_with_isnetis(path: String, scale: Option<i32>) -> napi::Result<Vec<u8>> {
+pub async fn segment_rgba_with_isnetis(path: String, scale: Option<i32>) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,

@@ -64,7 +64,7 @@ pub struct PixaiTagResult {
 /// * `model_name`: モデル名（デフォルトは `"v0.9"`）
 /// * `thresholds`: 一般タグおよびキャラクタタグのしきい値マップ（オプション）
 #[napi]
-pub fn get_pixai_tags(
+pub async fn get_pixai_tags(
     path: String,
     model_name: Option<String>,
     thresholds: Option<HashMap<String, f64>>,
@@ -118,7 +118,7 @@ pub fn get_pixai_tags(
 /// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
 /// * `model_name`: CCIPモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
 #[napi]
-pub fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Result<Vec<f64>> {
+pub async fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Result<Vec<f64>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -145,7 +145,7 @@ pub fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Res
 /// * `emb2`: 2つ目の768次元特徴ベクトル
 /// * `model_name`: メトリック評価に使用するモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
 #[napi]
-pub fn ccip_distance(
+pub async fn ccip_distance(
     emb1: Vec<f64>,
     emb2: Vec<f64>,
     model_name: Option<String>,

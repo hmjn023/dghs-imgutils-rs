@@ -149,7 +149,7 @@ pub fn detect_heads(
 
 /// 指定した画像ファイルパスから人物全身・半身を検出します。
 #[napi]
-pub fn detect_person(
+pub async fn detect_person(
     path: String,
     level: Option<String>,
     version: Option<String>,
