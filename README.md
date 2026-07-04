@@ -81,8 +81,8 @@ import {
   ccipSame,
 } from 'dghs-imgutils-rs';
 
-// Auto-tagging
-const tags = getPixaiTags('./anime_character.jpg');
+// Auto-tagging (async to avoid blocking the event loop)
+const tags = await getPixaiTags('./anime_character.jpg');
 console.log('General tags:', tags.general);
 console.log('Character tags:', tags.character);
 
@@ -94,11 +94,11 @@ faces.forEach((face, i) => {
 });
 
 // Background removal (returns PNG buffer)
-const pngBytes = segmentRgbaWithIsnetis('./anime_character.jpg');
+const pngBytes = await segmentRgbaWithIsnetis('./anime_character.jpg');
 
 // Character similarity
-const emb1 = ccipGetEmbedding('./character_a.jpg');
-const emb2 = ccipGetEmbedding('./character_b.jpg');
+const emb1 = await ccipGetEmbedding('./character_a.jpg');
+const emb2 = await ccipGetEmbedding('./character_b.jpg');
 const isSame = ccipSame(emb1, emb2);
 console.log(`Same character: ${isSame}`);
 ```
@@ -167,6 +167,20 @@ npm run build
 # Generate TypeScript type definitions
 npm run build  # includes --dts flag
 ```
+
+### GPU (CUDA) support
+
+By default the `ort` crate downloads a prebuilt ONNX Runtime static library. To use a system ONNX Runtime with a working CUDA execution provider, build with dynamic linking:
+
+```bash
+ORT_PREFER_DYNAMIC_LINK=1 ORT_LIB_PATH=/usr/lib npm run build
+```
+
+Requirements:
+- `libonnxruntime.so.1` and `libonnxruntime_providers_cuda.so` must be available (e.g. in `/usr/lib` or via `LD_LIBRARY_PATH`).
+- NVIDIA drivers and the matching CUDA runtime must be installed.
+
+For CPU-only inference, build normally without these environment variables.
 
 ## Documentation
 
