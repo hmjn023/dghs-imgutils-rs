@@ -15,6 +15,7 @@ use ort::session::Session;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
 
 /// ONNX セッションのキャッシュ。
 /// モデルファイルパスをキーとして、作成済みセッションを共有する。
@@ -39,11 +40,7 @@ pub fn init_onnx_runtime() -> Result<(), InferenceError> {
 ///
 /// * `model_path` - ONNX モデルファイルへのパス
 pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, InferenceError> {
-    use ort::ep::ExecutionProvider;
-    use ort::execution_providers::{
-        CUDAExecutionProvider, DirectMLExecutionProvider, OpenVINOExecutionProvider,
-        TensorRTExecutionProvider,
-    };
+    use ort::ep::{CUDA, DirectML, ExecutionProvider, OpenVINO, TensorRT};
 
     let mut builder =
         Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
@@ -51,63 +48,66 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
     let mut providers = Vec::new();
 
     // 1. TensorRT (NVIDIA 高性能 GPU)
-    let trt = TensorRTExecutionProvider::default();
+    let trt = TensorRT::default();
     match trt.is_available() {
         Ok(true) => {
-            println!("[ort] TensorRT EP is available! Enabling TRT.");
+            info!("[ort] TensorRT EP is available! Enabling TRT.");
             providers.push(trt.build());
         }
         Ok(false) => {}
         Err(e) => {
-            println!("[ort] TensorRT EP check error: {:?}", e);
+            warn!("[ort] TensorRT EP check error: {:?}", e);
         }
     }
 
     // 2. CUDA (NVIDIA 標準 GPU)
-    let cuda = CUDAExecutionProvider::default();
+    let cuda = CUDA::default();
     match cuda.is_available() {
         Ok(true) => {
-            println!("[ort] CUDA EP is available! Enabling NVIDIA GPU acceleration.");
+            info!("[ort] CUDA EP is available! Enabling NVIDIA GPU acceleration.");
             providers.push(cuda.build());
         }
         Ok(false) => {
-            println!("[ort] CUDA EP is not available (returned false).");
+            info!("[ort] CUDA EP is not available (returned false).");
         }
         Err(e) => {
-            println!("[ort] CUDA EP check error: {:?}", e);
+            warn!("[ort] CUDA EP check error: {:?}", e);
         }
     }
 
     // 3. DirectML (Windows NPU/GPU)
-    let dml = DirectMLExecutionProvider::default();
+    let dml = DirectML::default();
     match dml.is_available() {
         Ok(true) => {
-            println!("[ort] DirectML EP is available! Enabling DirectML.");
+            info!("[ort] DirectML EP is available! Enabling DirectML.");
             providers.push(dml.build());
         }
         Ok(false) => {}
         Err(e) => {
-            println!("[ort] DirectML EP check error: {:?}", e);
+            warn!("[ort] DirectML EP check error: {:?}", e);
         }
     }
 
     // 4. OpenVINO (Intel CPU/GPU/NPU)
-    let openvino = OpenVINOExecutionProvider::default();
+    let openvino = OpenVINO::default();
     match openvino.is_available() {
         Ok(true) => {
-            println!("[ort] OpenVINO EP is available! Enabling Intel NPU/GPU/CPU acceleration.");
+            info!("[ort] OpenVINO EP is available! Enabling Intel NPU/GPU/CPU acceleration.");
             providers.push(openvino.build());
         }
         Ok(false) => {}
         Err(e) => {
-            println!("[ort] OpenVINO EP check error: {:?}", e);
+            warn!("[ort] OpenVINO EP check error: {:?}", e);
         }
     }
 
     if !providers.is_empty() {
-        builder = builder
-            .with_execution_providers(providers)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+        match builder.clone().with_execution_providers(providers) {
+            Ok(b) => builder = b,
+            Err(e) => {
+                warn!("[ort] Failed to register execution providers, falling back to CPU: {:?}", e);
+            }
+        }
     }
 
     let session = builder

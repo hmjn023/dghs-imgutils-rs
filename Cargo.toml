@@ -1,6 +1,6 @@
 [package]
 name = "dghs-imgutils-rs"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 
 [lib]
@@ -32,6 +32,7 @@ regex = "1.11"
 url = "2"
 tar = "0.4"
 rand = "0.8"
+tracing = "0.1"
 napi = { version = "2.16.11", features = ["async", "serde-json", "napi4"], optional = true }
 napi-derive = { version = "2.16.9", optional = true }
 
