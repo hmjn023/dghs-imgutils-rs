@@ -246,7 +246,9 @@ pub fn get_camie_tags(
             let refined_pred = outputs
                 .get("output")
                 .or_else(|| outputs.get("refined/output"))
-                .ok_or_else(|| TaggingError::InvalidArgument("No refined output found".to_string()))?;
+                .ok_or_else(|| {
+                    TaggingError::InvalidArgument("No refined output found".to_string())
+                })?;
             let (_shape, refined_pred_data) = refined_pred.try_extract_tensor::<f32>()?;
 
             let refined_emb = outputs
@@ -266,7 +268,9 @@ pub fn get_camie_tags(
             let init_pred = outputs
                 .get("output")
                 .or_else(|| outputs.get("initial/output"))
-                .ok_or_else(|| TaggingError::InvalidArgument("No initial output found".to_string()))?;
+                .ok_or_else(|| {
+                    TaggingError::InvalidArgument("No initial output found".to_string())
+                })?;
             let (_shape, init_pred_data) = init_pred.try_extract_tensor::<f32>()?;
 
             (init_pred_data.to_vec(), None)

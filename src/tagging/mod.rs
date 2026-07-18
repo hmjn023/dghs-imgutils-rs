@@ -7,6 +7,7 @@ pub mod deepdanbooru;
 pub mod deepgelbooru;
 pub mod format;
 pub mod mldanbooru;
+pub mod oppaioracle;
 pub mod order;
 pub mod overlap;
 pub mod pixai;

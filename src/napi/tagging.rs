@@ -2,6 +2,7 @@ use crate::tagging::camie::get_camie_tags as core_camie;
 use crate::tagging::deepdanbooru::get_deepdanbooru_tags as core_deepdanbooru;
 use crate::tagging::deepgelbooru::get_deepgelbooru_tags as core_deepgelbooru;
 use crate::tagging::mldanbooru::get_mldanbooru_tags as core_mldanbooru;
+use crate::tagging::oppaioracle::get_oppaioracle_tags as core_oppaioracle;
 use crate::tagging::wd14::get_wd14_tags as core_wd14;
 use napi_derive::napi;
 use std::collections::HashMap;
@@ -186,6 +187,41 @@ pub fn get_camie_tags(
     Ok(TagResult {
         general: vec_to_map(result.general),
         character: vec_to_map(result.character),
+        rating: vec_to_map(rating),
+        tag: vec_to_map(result.tag),
+    })
+}
+
+#[napi]
+pub fn get_oppaioracle_tags(
+    path: String,
+    model_name: Option<String>,
+    threshold: Option<f64>,
+    no_underline: Option<bool>,
+) -> napi::Result<TagResult> {
+    let image = crate::napi::open_image_robust(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
+    let model = model_name.unwrap_or_else(|| "v1.1".to_string());
+    let result = core_oppaioracle(
+        &image,
+        &model,
+        threshold.map(|t| t as f32),
+        no_underline.unwrap_or(false),
+    )
+    .map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("OppaiOracle failed: {}", e),
+        )
+    })?;
+    let rating = result.rest.get("rating").cloned().unwrap_or_default();
+    Ok(TagResult {
+        general: vec_to_map(result.general),
+        character: HashMap::new(),
         rating: vec_to_map(rating),
         tag: vec_to_map(result.tag),
     })

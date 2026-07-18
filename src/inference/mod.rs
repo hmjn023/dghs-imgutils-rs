@@ -105,7 +105,10 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
         match builder.clone().with_execution_providers(providers) {
             Ok(b) => builder = b,
             Err(e) => {
-                warn!("[ort] Failed to register execution providers, falling back to CPU: {:?}", e);
+                warn!(
+                    "[ort] Failed to register execution providers, falling back to CPU: {:?}",
+                    e
+                );
             }
         }
     }
