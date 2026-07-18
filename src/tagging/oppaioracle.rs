@@ -188,16 +188,41 @@ pub fn get_oppaioracle_tags(
 
     let vocab_content = std::fs::read_to_string(vocab_path)?;
     let vocab: Vocabulary = serde_json::from_str(&vocab_content)?;
-    let pad_idx = vocab.tag_to_index.get("<PAD>").copied().unwrap_or(0);
-    let unk_idx = vocab.tag_to_index.get("<UNK>").copied().unwrap_or(1);
+    let pad_idx =
+        vocab.tag_to_index.get("<PAD>").copied().ok_or_else(|| {
+            TaggingError::InvalidArgument("Vocabulary is missing <PAD>".to_string())
+        })?;
+    let unk_idx =
+        vocab.tag_to_index.get("<UNK>").copied().ok_or_else(|| {
+            TaggingError::InvalidArgument("Vocabulary is missing <UNK>".to_string())
+        })?;
 
-    // index -> tag の逆引きテーブル
-    let mut index_to_tag: Vec<String> = vec![String::new(); vocab.tag_to_index.len()];
+    // index -> tag の逆引きテーブル (インデックスの一意性・範囲・連続性を検証)
+    let mut index_to_tag = vec![None; vocab.tag_to_index.len()];
     for (tag, idx) in &vocab.tag_to_index {
-        index_to_tag[*idx] = tag.clone();
+        let slot = index_to_tag.get_mut(*idx).ok_or_else(|| {
+            TaggingError::InvalidArgument(format!("Vocabulary index {idx} is out of range"))
+        })?;
+        if slot.replace(tag.clone()).is_some() {
+            return Err(TaggingError::InvalidArgument(format!(
+                "Duplicate vocabulary index: {idx}"
+            )));
+        }
     }
+    let index_to_tag: Vec<String> =
+        index_to_tag
+            .into_iter()
+            .collect::<Option<_>>()
+            .ok_or_else(|| {
+                TaggingError::InvalidArgument("Vocabulary indices are not contiguous".to_string())
+            })?;
 
     let threshold = threshold.unwrap_or_else(|| load_default_threshold(&variant));
+    if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+        return Err(TaggingError::InvalidArgument(
+            "Threshold must be a finite value between 0 and 1".to_string(),
+        ));
+    }
 
     // 2. 前処理 (レターボックス + 正規化 + パディングマスク)
     let (input_tensor, padding_mask) = letterbox_to_tensor(image, variant.image_size);

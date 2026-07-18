@@ -192,8 +192,19 @@ pub fn get_camie_tags(
     })
 }
 
+/// 指定した画像ファイルパスから OppaiOracle モデルを用いてアニメ調イラストのタグとその確信度スコアを予測します。
+///
+/// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
+/// * `model_name`: モデルバリアント (`"v1"` または `"v1.1"`, デフォルト `"v1.1"`)
+/// * `threshold`: タグ採用の確率閾値 (0.0〜1.0)。省略時はモデル同梱の
+///   `pr_thresholds.json` にある macro P=R breakeven 閾値を使用
+/// * `no_underline`: `true` の場合、タグ名のアンダースコアをスペースに置換 (デフォルト `false`)
+///
+/// 戻り値の `TagResult` には `general` / `tag` に全タグ (確率降順)、
+/// `rating` にレーティングスコアが格納されます (このモデルの語彙は一般タグのみのため
+/// `character` は空です)。
 #[napi]
-pub fn get_oppaioracle_tags(
+pub async fn get_oppaioracle_tags(
     path: String,
     model_name: Option<String>,
     threshold: Option<f64>,
@@ -212,11 +223,15 @@ pub fn get_oppaioracle_tags(
         threshold.map(|t| t as f32),
         no_underline.unwrap_or(false),
     )
-    .map_err(|e| {
-        napi::Error::new(
+    .map_err(|e| match e {
+        crate::tagging::TaggingError::InvalidArgument(msg) => napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("OppaiOracle failed: {}", msg),
+        ),
+        e => napi::Error::new(
             napi::Status::GenericFailure,
             format!("OppaiOracle failed: {}", e),
-        )
+        ),
     })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
