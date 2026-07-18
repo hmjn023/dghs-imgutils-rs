@@ -14,7 +14,7 @@
 
 | モジュール | 説明 | 状態 |
 |-----------|------|------|
-| `tagging` | 自動タグ付け（WD14, DeepDanbooru, PixAI, Camie など） | 実装済み |
+| `tagging` | 自動タグ付け（WD14, DeepDanbooru, PixAI, Camie, OppaiOracle など） | 実装済み |
 | `detect` | 物体検出（顔、頭部、人物、目、手、上半身、検閲、テキスト） | 実装済み |
 | `segment` | キャラクターセグメンテーション・背景透過（ISNetIS） | 実装済み |
 | `edge` | エッジ検出・線画生成（Canny, Lineart, LineartAnime） | 実装済み |
@@ -137,6 +137,7 @@ npm run build:debug
 ```typescript
 // タグ付け
 getPixaiTags(path, modelName?, thresholds?): PixaiTagResult
+getOppaioracleTags(path, modelName?, threshold?, noUnderline?): TagResult
 
 // キャラクター類似度
 ccipGetEmbedding(path, modelName?): number[]

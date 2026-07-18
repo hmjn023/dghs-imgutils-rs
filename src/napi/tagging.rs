@@ -2,6 +2,7 @@ use crate::tagging::camie::get_camie_tags as core_camie;
 use crate::tagging::deepdanbooru::get_deepdanbooru_tags as core_deepdanbooru;
 use crate::tagging::deepgelbooru::get_deepgelbooru_tags as core_deepgelbooru;
 use crate::tagging::mldanbooru::get_mldanbooru_tags as core_mldanbooru;
+use crate::tagging::oppaioracle::get_oppaioracle_tags as core_oppaioracle;
 use crate::tagging::wd14::get_wd14_tags as core_wd14;
 use napi_derive::napi;
 use std::collections::HashMap;
@@ -186,6 +187,56 @@ pub fn get_camie_tags(
     Ok(TagResult {
         general: vec_to_map(result.general),
         character: vec_to_map(result.character),
+        rating: vec_to_map(rating),
+        tag: vec_to_map(result.tag),
+    })
+}
+
+/// 指定した画像ファイルパスから OppaiOracle モデルを用いてアニメ調イラストのタグとその確信度スコアを予測します。
+///
+/// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
+/// * `model_name`: モデルバリアント (`"v1"` または `"v1.1"`, デフォルト `"v1.1"`)
+/// * `threshold`: タグ採用の確率閾値 (0.0〜1.0)。省略時はモデル同梱の
+///   `pr_thresholds.json` にある macro P=R breakeven 閾値を使用
+/// * `no_underline`: `true` の場合、タグ名のアンダースコアをスペースに置換 (デフォルト `false`)
+///
+/// 戻り値の `TagResult` には `general` / `tag` に全タグ (確率降順)、
+/// `rating` にレーティングスコアが格納されます (このモデルの語彙は一般タグのみのため
+/// `character` は空です)。
+#[napi]
+pub async fn get_oppaioracle_tags(
+    path: String,
+    model_name: Option<String>,
+    threshold: Option<f64>,
+    no_underline: Option<bool>,
+) -> napi::Result<TagResult> {
+    let image = crate::napi::open_image_robust(&path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Failed to open image: {}", e),
+        )
+    })?;
+    let model = model_name.unwrap_or_else(|| "v1.1".to_string());
+    let result = core_oppaioracle(
+        &image,
+        &model,
+        threshold.map(|t| t as f32),
+        no_underline.unwrap_or(false),
+    )
+    .map_err(|e| match e {
+        crate::tagging::TaggingError::InvalidArgument(msg) => napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("OppaiOracle failed: {}", msg),
+        ),
+        e => napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("OppaiOracle failed: {}", e),
+        ),
+    })?;
+    let rating = result.rest.get("rating").cloned().unwrap_or_default();
+    Ok(TagResult {
+        general: vec_to_map(result.general),
+        character: HashMap::new(),
         rating: vec_to_map(rating),
         tag: vec_to_map(result.tag),
     })

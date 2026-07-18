@@ -37,7 +37,8 @@ pub fn open_image_robust(path: &str) -> image::ImageResult<DynamicImage> {
                 [0x42, 0x4D, ..] => image::ImageFormat::Bmp,
                 _ => return Err(first_err),
             };
-            file.seek(std::io::SeekFrom::Start(0)).map_err(image::ImageError::IoError)?;
+            file.seek(std::io::SeekFrom::Start(0))
+                .map_err(image::ImageError::IoError)?;
             let mut reader = image::ImageReader::new(std::io::BufReader::new(file));
             reader.set_format(format);
             reader.decode()
@@ -118,7 +119,10 @@ pub async fn get_pixai_tags(
 /// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
 /// * `model_name`: CCIPモデル名（オプション。省略時は `"ccip-caformer-24-randaug-pruned"`）
 #[napi]
-pub async fn ccip_get_embedding(path: String, model_name: Option<String>) -> napi::Result<Vec<f64>> {
+pub async fn ccip_get_embedding(
+    path: String,
+    model_name: Option<String>,
+) -> napi::Result<Vec<f64>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
