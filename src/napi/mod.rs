@@ -3,6 +3,7 @@ use crate::metrics::ccip::{
     ccip_difference as core_ccip_difference, ccip_extract_feature as core_ccip_extract_feature,
     ccip_merge as core_ccip_merge, ccip_same as core_ccip_same,
 };
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::tagging::pixai::get_pixai_tags as core_get_pixai_tags;
 use image::DynamicImage;
 use napi_derive::napi;
@@ -69,6 +70,7 @@ pub async fn get_pixai_tags(
     path: String,
     model_name: Option<String>,
     thresholds: Option<HashMap<String, f64>>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<PixaiTagResult> {
     // 1. パスから画像を開く (Rust側で透過PNG白ブレンド含む前処理が自動適用されます)
     let image = open_image_robust(&path).map_err(|e| {
@@ -87,11 +89,13 @@ pub async fn get_pixai_tags(
     });
 
     // 2. コア予測の実行
-    let result = core_get_pixai_tags(&image, model, core_thresholds).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("PixAI tagger prediction failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        core_get_pixai_tags(&image, model, core_thresholds).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("PixAI tagger prediction failed: {}", e),
+            )
+        })
     })?;
 
     // 3. f32 -> f64 に変換して返す
@@ -122,6 +126,7 @@ pub async fn get_pixai_tags(
 pub async fn ccip_get_embedding(
     path: String,
     model_name: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<f64>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -133,11 +138,13 @@ pub async fn ccip_get_embedding(
     let model = model_name.as_deref().unwrap_or("");
 
     // CCIP の入力解像度はデフォルト 384
-    let embedding = core_ccip_extract_feature(&image, 384, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("CCIP embedding extraction failed: {}", e),
-        )
+    let embedding = run_with_inference_options(inference_options, || {
+        core_ccip_extract_feature(&image, 384, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("CCIP embedding extraction failed: {}", e),
+            )
+        })
     })?;
 
     Ok(embedding.into_iter().map(|v| v as f64).collect())
@@ -530,6 +537,7 @@ pub mod detect;
 pub mod edge;
 pub mod generic;
 pub mod image_utils;
+pub mod inference;
 pub mod metadata_sd;
 pub mod metrics;
 pub mod ocr;

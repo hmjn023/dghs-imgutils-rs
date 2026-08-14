@@ -2,13 +2,9 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 use image::DynamicImage;
 use ndarray::Array4;
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
-
-static ISNETIS_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
 
 /// ISNetIS 用の画像前処理。
 /// アスペクト比を維持して scale 解像度の長辺に合わせ、黒背景キャンバスの中央にパディング配置します。
@@ -67,15 +63,10 @@ pub fn get_isnetis_mask(
     image: &DynamicImage,
     scale: u32,
 ) -> Result<ndarray::Array2<f32>, InferenceError> {
-    let mut lock = ISNETIS_SESSION
-        .lock()
+    let path = hf_hub_download("skytnt/anime-seg", "isnetis.onnx", None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    if lock.is_none() {
-        let path = hf_hub_download("skytnt/anime-seg", "isnetis.onnx", None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-        *lock = Some(create_onnx_session(path)?);
-    }
-    let session = lock.as_mut().unwrap();
+    let session: SharedSession = get_or_create_session(path)?;
+    let mut session = lock_session(&session)?;
 
     // 1. 前処理
     let (input_tensor, old_size, (w, h, pad_left, pad_top)) = preprocess_isnetis(image, scale)?;

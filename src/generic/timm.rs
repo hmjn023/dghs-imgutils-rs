@@ -1,20 +1,20 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use image::DynamicImage;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 use serde::Deserialize;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 
 /// A cached TIMM model entry shared between classify and multilabel variants.
 struct TIMMEntry {
-    session: Session,
+    model_path: PathBuf,
     labels: Vec<String>,
     preprocess: PreprocessConfig,
 }
@@ -62,8 +62,6 @@ fn ensure_timm_model(repo_id: &str) -> Result<(), GenericError> {
         }
     }
 
-    let session = create_onnx_session(&model_path)?;
-
     // Try to load preprocess.json
     let preprocess = match hf_hub_download(repo_id, "preprocess.json", None, None) {
         Ok(p) => {
@@ -80,7 +78,7 @@ fn ensure_timm_model(repo_id: &str) -> Result<(), GenericError> {
     };
 
     let entry = TIMMEntry {
-        session,
+        model_path,
         labels,
         preprocess,
     };
@@ -163,14 +161,23 @@ pub fn classify_timm_predict(
 ) -> Result<ClassifyResult, GenericError> {
     ensure_timm_model(repo_id)?;
 
-    let mut cache = TIMM_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(repo_id)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let (model_path, labels, preprocess) = {
+        let cache = TIMM_CACHE.lock().unwrap();
+        let entry = cache
+            .get(repo_id)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        (
+            entry.model_path.clone(),
+            entry.labels.clone(),
+            entry.preprocess.clone(),
+        )
+    };
 
-    let tensor = apply_preprocess(image, &entry.preprocess.test)?;
+    let tensor = apply_preprocess(image, &preprocess.test)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
+    let outputs = session.run(ort::inputs![
         "input" => ort::value::Tensor::from_array(tensor)?
     ])?;
 
@@ -193,8 +200,8 @@ pub fn classify_timm_predict(
 
     let mut result = HashMap::new();
     for &idx in indices.iter().take(k.min(scores.len())) {
-        if idx < entry.labels.len() {
-            result.insert(entry.labels[idx].clone(), scores[idx]);
+        if idx < labels.len() {
+            result.insert(labels[idx].clone(), scores[idx]);
         }
     }
 
@@ -218,14 +225,23 @@ pub fn multilabel_timm_predict(
 ) -> Result<MultiLabelResult, GenericError> {
     ensure_timm_model(repo_id)?;
 
-    let mut cache = TIMM_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(repo_id)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let (model_path, labels, preprocess) = {
+        let cache = TIMM_CACHE.lock().unwrap();
+        let entry = cache
+            .get(repo_id)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        (
+            entry.model_path.clone(),
+            entry.labels.clone(),
+            entry.preprocess.clone(),
+        )
+    };
 
-    let tensor = apply_preprocess(image, &entry.preprocess.test)?;
+    let tensor = apply_preprocess(image, &preprocess.test)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
+    let outputs = session.run(ort::inputs![
         "input" => ort::value::Tensor::from_array(tensor)?
     ])?;
 
@@ -240,7 +256,7 @@ pub fn multilabel_timm_predict(
     let mut categories: HashMap<String, HashMap<String, f32>> = HashMap::new();
     let mut tags: HashMap<String, f32> = HashMap::new();
 
-    for (i, label) in entry.labels.iter().enumerate() {
+    for (i, label) in labels.iter().enumerate() {
         if i >= scores.len() {
             break;
         }

@@ -12,7 +12,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use image::DynamicImage;
 use image::imageops::FilterType;
 use ndarray::Array4;
@@ -20,6 +20,7 @@ use once_cell::sync::Lazy;
 use ort::session::Session;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// meta.json のスキーマ
@@ -30,7 +31,7 @@ struct MetaJson {
 
 /// ロード済みモデルのキャッシュエントリ
 struct ClassifyEntry {
-    session: Session,
+    model_path: PathBuf,
     labels: Vec<String>,
     input_w: u32,
     input_h: u32,
@@ -63,13 +64,16 @@ fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), Inferenc
     let meta: MetaJson = serde_json::from_str(&meta_str)
         .map_err(|e| InferenceError::Initialization(format!("meta.json parse error: {}", e)))?;
 
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     // 入力サイズをモデルメタから取得（fallback: 224x224）
-    let (input_w, input_h) = get_model_input_size(&session);
+    let (input_w, input_h) = {
+        let session_guard = lock_session(&session)?;
+        get_model_input_size(&session_guard)
+    };
 
     let entry = ClassifyEntry {
-        session,
+        model_path,
         labels: meta.labels,
         input_w,
         input_h,
@@ -103,15 +107,25 @@ pub fn classify_predict(
     ensure_classify_model(repo_id, model_name)?;
 
     let key = format!("{}/{}", repo_id, model_name);
-    let mut cache = CLASSIFY_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| InferenceError::Initialization("Model not found in cache".to_string()))?;
+    let (model_path, labels, input_w, input_h) = {
+        let cache = CLASSIFY_CACHE.lock().unwrap();
+        let entry = cache.get(&key).ok_or_else(|| {
+            InferenceError::Initialization("Model not found in cache".to_string())
+        })?;
+        (
+            entry.model_path.clone(),
+            entry.labels.clone(),
+            entry.input_w,
+            entry.input_h,
+        )
+    };
 
-    let tensor = preprocess_classify(image, entry.input_w, entry.input_h)?;
-    let outputs = entry
-        .session
-        .run(ort::inputs!["input" => ort::value::Tensor::from_array(tensor.clone())?])?;
+    let tensor = preprocess_classify(image, input_w, input_h)?;
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
+    let outputs = session.run(ort::inputs![
+        "input" => ort::value::Tensor::from_array(tensor.clone())?
+    ])?;
 
     let (_, output_slice) = outputs["output"]
         .try_extract_tensor::<f32>()
@@ -124,8 +138,7 @@ pub fn classify_predict(
     let sum: f32 = exps.iter().sum();
     let probs: Vec<f32> = exps.iter().map(|&x| x / sum).collect();
 
-    let result: HashMap<String, f32> = entry
-        .labels
+    let result: HashMap<String, f32> = labels
         .iter()
         .zip(probs.iter())
         .map(|(label, &prob)| (label.clone(), prob))
@@ -170,4 +183,30 @@ pub fn classify_top1(
         .map(|(k, _)| k.clone())
         .ok_or_else(|| InferenceError::InvalidShape("Empty output".to_string()))?;
     Ok((top, scores))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::{Backend, Precision, SessionKey, SessionOptions};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn cached_model_path_resolves_distinct_backend_session_keys() {
+        let mut model = NamedTempFile::new().unwrap();
+        model.write_all(b"model").unwrap();
+
+        let cpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::Cpu).with_precision(Precision::Fp32),
+        )
+        .unwrap();
+        let gpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::AmdGpu).with_precision(Precision::Fp16),
+        )
+        .unwrap();
+
+        assert_ne!(cpu, gpu);
+    }
 }

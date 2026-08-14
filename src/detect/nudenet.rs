@@ -4,16 +4,9 @@
 use crate::detect::base::Detection;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use image::DynamicImage;
 use ndarray::{Array1, Array4};
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
-
-static NUDENET_YOLO_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(None));
-static NUDENET_NMS_SESSION: Lazy<Mutex<Option<ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(None));
 
 /// NudeNet の 18 クラスラベルの定義
 pub const NUDENET_LABELS: &[&str] = &[
@@ -79,26 +72,16 @@ pub fn detect_with_nudenet(
     let repo_id = "deepghs/nudenet_onnx";
 
     // 1. YOLOv8 検出モデルの初期化・取得
-    let mut yolo_lock = NUDENET_YOLO_SESSION
-        .lock()
+    let yolo_path = hf_hub_download(repo_id, "320n.onnx", None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    if yolo_lock.is_none() {
-        let path = hf_hub_download(repo_id, "320n.onnx", None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-        *yolo_lock = Some(create_onnx_session(path)?);
-    }
-    let yolo_session = yolo_lock.as_mut().unwrap();
+    let yolo_session = get_or_create_session(yolo_path)?;
+    let mut yolo_session = lock_session(&yolo_session)?;
 
     // 2. NMS 処理モデルの初期化・取得
-    let mut nms_lock = NUDENET_NMS_SESSION
-        .lock()
+    let nms_path = hf_hub_download(repo_id, "nms-yolov8.onnx", None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    if nms_lock.is_none() {
-        let path = hf_hub_download(repo_id, "nms-yolov8.onnx", None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-        *nms_lock = Some(create_onnx_session(path)?);
-    }
-    let nms_session = nms_lock.as_mut().unwrap();
+    let nms_session = get_or_create_session(nms_path)?;
+    let mut nms_session = lock_session(&nms_session)?;
 
     // 3. 画像の前処理
     let (input_tensor, global_ratio) = preprocess_nudenet(image, 320)?;

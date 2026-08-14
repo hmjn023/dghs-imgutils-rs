@@ -1,6 +1,7 @@
 //! 画像操作 (operate) モジュールの napi-rs バインディング。
 
 use crate::detect::base::BBox;
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::operate::align::align_maxsize as core_align_maxsize;
 use crate::operate::censor::CensorMethod;
 use crate::operate::censor::censor_nsfw as core_censor_nsfw;
@@ -36,6 +37,7 @@ pub fn censor_nsfw_image(
     nipple_f: Option<bool>,
     penis: Option<bool>,
     pussy: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -68,18 +70,20 @@ pub fn censor_nsfw_image(
         fit: censor_fit,
     };
 
-    let result = core_censor_nsfw_image(
-        &image,
-        &method,
-        nipple_f.unwrap_or(false),
-        penis.unwrap_or(true),
-        pussy.unwrap_or(true),
-    )
-    .map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("NSFW image censor failed: {}", e),
+    let result = run_with_inference_options(inference_options, || {
+        core_censor_nsfw_image(
+            &image,
+            &method,
+            nipple_f.unwrap_or(false),
+            penis.unwrap_or(true),
+            pussy.unwrap_or(true),
         )
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("NSFW image censor failed: {}", e),
+            )
+        })
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());
@@ -233,6 +237,7 @@ pub fn censor_nsfw_basic(
     nipple_f: Option<bool>,
     penis: Option<bool>,
     pussy: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let r = radius.unwrap_or(4.0) as f32;
     let censor_method = match method.as_deref() {
@@ -240,18 +245,20 @@ pub fn censor_nsfw_basic(
         Some("color") => CensorMethod::Color { color: [255, 0, 0] },
         _ => CensorMethod::Pixelate { radius: r as u32 },
     };
-    let result = core_censor_nsfw(
-        &path,
-        &censor_method,
-        nipple_f.unwrap_or(false),
-        penis.unwrap_or(true),
-        pussy.unwrap_or(true),
-    )
-    .map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("NSFW censor failed: {}", e),
+    let result = run_with_inference_options(inference_options, || {
+        core_censor_nsfw(
+            &path,
+            &censor_method,
+            nipple_f.unwrap_or(false),
+            penis.unwrap_or(true),
+            pussy.unwrap_or(true),
         )
+        .map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("NSFW censor failed: {}", e),
+            )
+        })
     })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     result

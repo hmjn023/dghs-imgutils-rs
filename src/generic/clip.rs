@@ -5,18 +5,17 @@ use std::sync::Mutex;
 use image::DynamicImage;
 use ndarray::{Array2, Array4};
 use once_cell::sync::Lazy;
-use ort::session::Session;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::{force_image_background, to_ndarray_chw};
-use crate::inference::create_onnx_session;
+use crate::inference::{get_or_create_session, lock_session};
 
 const DEFAULT_REPO_ID: &str = "deepghs/clip_onnx";
 
 struct ClipModelEntry {
-    image_encoder: Session,
-    text_encoder: Session,
+    image_encoder_path: PathBuf,
+    text_encoder_path: PathBuf,
     logit_scale: f32,
     input_size: u32,
 }
@@ -52,12 +51,9 @@ fn ensure_clip_model(repo_id: &str, model_name: &str) -> Result<(), GenericError
     let logit_scale = meta["logit_scale"].as_f64().unwrap_or(4.605170185988091) as f32;
     let input_size = meta["input_size"].as_u64().unwrap_or(224) as u32;
 
-    let image_encoder = create_onnx_session(&image_encoder_path)?;
-    let text_encoder = create_onnx_session(&text_encoder_path)?;
-
     let entry = ClipModelEntry {
-        image_encoder,
-        text_encoder,
+        image_encoder_path,
+        text_encoder_path,
         logit_scale,
         input_size,
     };
@@ -92,13 +88,15 @@ pub fn clip_image_encode(
     ensure_clip_model(repo, model_name)?;
 
     let key = format!("{}/{}", repo, model_name);
-    let mut cache = CLIP_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let (image_encoder_path, size) = {
+        let cache = CLIP_CACHE.lock().unwrap();
+        let entry = cache
+            .get(&key)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        (entry.image_encoder_path.clone(), entry.input_size)
+    };
 
     let n = images.len();
-    let size = entry.input_size;
     let mut batch = Array4::<f32>::zeros((n, 3, size as usize, size as usize));
     for (i, img) in images.iter().enumerate() {
         let tensor = preprocess_clip_image(img, size)?;
@@ -107,9 +105,11 @@ pub fn clip_image_encode(
             .assign(&tensor.slice(ndarray::s![0, .., .., ..]));
     }
 
-    let outputs = entry
-        .image_encoder
-        .run(ort::inputs!["pixel_values" => ort::value::Tensor::from_array(batch)?])?;
+    let image_encoder = get_or_create_session(&image_encoder_path)?;
+    let mut image_encoder = lock_session(&image_encoder)?;
+    let outputs = image_encoder.run(ort::inputs![
+        "pixel_values" => ort::value::Tensor::from_array(batch)?
+    ])?;
 
     let extract = |name: &str| -> Result<Vec<Vec<f32>>, GenericError> {
         let val = outputs
@@ -240,10 +240,13 @@ pub fn clip_text_encode(
     ensure_clip_model(repo, model_name)?;
 
     let key = format!("{}/{}", repo, model_name);
-    let mut cache = CLIP_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let text_encoder_path = {
+        let cache = CLIP_CACHE.lock().unwrap();
+        let entry = cache
+            .get(&key)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        entry.text_encoder_path.clone()
+    };
 
     let tokenizer = get_tokenizer(repo, model_name)?;
     let (all_ids, all_masks) = tokenizer.encode_batch(texts);
@@ -258,7 +261,9 @@ pub fn clip_text_encode(
         }
     }
 
-    let outputs = entry.text_encoder.run(ort::inputs![
+    let text_encoder = get_or_create_session(&text_encoder_path)?;
+    let mut text_encoder = lock_session(&text_encoder)?;
+    let outputs = text_encoder.run(ort::inputs![
         "input_ids" => ort::value::Tensor::from_array(input_ids)?,
         "attention_mask" => ort::value::Tensor::from_array(attention_mask)?,
     ])?;

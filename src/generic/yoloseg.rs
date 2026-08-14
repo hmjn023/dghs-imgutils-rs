@@ -3,14 +3,14 @@ use std::sync::Mutex;
 
 use image::DynamicImage;
 use image::imageops::FilterType;
-use ndarray::{Array2, Array4};
+use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
+use std::path::PathBuf;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, yolo_nms, yolo_xywh2xyxy};
+use crate::inference::{get_or_create_session, lock_session, yolo_nms, yolo_xywh2xyxy};
 
 /// A segmentation detection result.
 #[derive(Debug, Clone)]
@@ -26,7 +26,7 @@ pub struct SegDetection {
 }
 
 struct YOLOSegEntry {
-    session: Session,
+    model_path: PathBuf,
     max_infer_size: u32,
     labels: Vec<String>,
 }
@@ -45,11 +45,12 @@ fn ensure_yoloseg_model(repo_id: &str, model_name: &str) -> Result<(), GenericEr
 
     let model_path = hf_hub_download(repo_id, &format!("{}/model.onnx", model_name), None, None)?;
 
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     // Extract metadata from the model (in a block to drop the borrow on session)
     let (max_infer_size, labels) = {
-        let metadata = session.metadata()?;
+        let session_guard = lock_session(&session)?;
+        let metadata = session_guard.metadata()?;
         let imgsz_str = metadata
             .custom("imgsz")
             .unwrap_or_else(|| "640".to_string());
@@ -77,7 +78,7 @@ fn ensure_yoloseg_model(repo_id: &str, model_name: &str) -> Result<(), GenericEr
     };
 
     let entry = YOLOSegEntry {
-        session,
+        model_path,
         max_infer_size,
         labels,
     };
@@ -162,14 +163,23 @@ pub fn yolo_seg_predict(
     ensure_yoloseg_model(repo_id, model_name)?;
 
     let key = format!("{}/{}", repo_id, model_name);
-    let mut cache = YOLOSEG_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let (model_path, max_infer_size, labels) = {
+        let cache = YOLOSEG_CACHE.lock().unwrap();
+        let entry = cache
+            .get(&key)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        (
+            entry.model_path.clone(),
+            entry.max_infer_size,
+            entry.labels.clone(),
+        )
+    };
 
-    let (input_tensor, old_size, new_size) = preprocess_yoloseg(image, entry.max_infer_size)?;
+    let (input_tensor, old_size, new_size) = preprocess_yoloseg(image, max_infer_size)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
+    let outputs = session.run(ort::inputs![
         "images" => ort::value::Tensor::from_array(input_tensor)?
     ])?;
 
@@ -191,7 +201,7 @@ pub fn yolo_seg_predict(
             shape0_vec
         )));
     }
-    let num_classes = entry.labels.len();
+    let num_classes = labels.len();
     let proto_dim = shape0_vec[1] - 4 - num_classes;
     let num_boxes = shape0_vec[2];
 
@@ -295,7 +305,7 @@ pub fn yolo_seg_predict(
 
         detections.push(SegDetection {
             bbox: (x0, y0, x1, y1),
-            label: entry.labels[class_ids[idx]].clone(),
+            label: labels[class_ids[idx]].clone(),
             score: scores[idx],
             mask,
         });
@@ -307,11 +317,33 @@ pub fn yolo_seg_predict(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::{Backend, Precision, SessionKey, SessionOptions};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_xy_postprocess() {
         let (x, y) = xy_postprocess(100.0, 50.0, (800, 600), (640, 480));
         assert_eq!(x, 125);
         assert_eq!(y, 63);
+    }
+
+    #[test]
+    fn cached_model_path_resolves_distinct_backend_session_keys() {
+        let mut model = NamedTempFile::new().unwrap();
+        model.write_all(b"model").unwrap();
+
+        let cpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::Cpu).with_precision(Precision::Fp32),
+        )
+        .unwrap();
+        let gpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::AmdGpu).with_precision(Precision::Fp16),
+        )
+        .unwrap();
+
+        assert_ne!(cpu, gpu);
     }
 }

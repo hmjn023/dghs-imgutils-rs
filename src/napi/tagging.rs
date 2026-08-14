@@ -1,3 +1,4 @@
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::tagging::camie::get_camie_tags as core_camie;
 use crate::tagging::deepdanbooru::get_deepdanbooru_tags as core_deepdanbooru;
 use crate::tagging::deepgelbooru::get_deepgelbooru_tags as core_deepgelbooru;
@@ -25,6 +26,7 @@ pub fn get_deepdanbooru_tags(
     general_threshold: Option<f64>,
     character_threshold: Option<f64>,
     use_real_name: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -35,11 +37,13 @@ pub fn get_deepdanbooru_tags(
     let gt = general_threshold.unwrap_or(0.5) as f32;
     let ct = character_threshold.unwrap_or(0.5) as f32;
     let ur = use_real_name.unwrap_or(false);
-    let result = core_deepdanbooru(&image, gt, ct, ur).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("DeepDanbooru failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        core_deepdanbooru(&image, gt, ct, ur).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("DeepDanbooru failed: {}", e),
+            )
+        })
     })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
@@ -57,6 +61,7 @@ pub fn get_mldanbooru_tags(
     size: Option<i32>,
     keep_ratio: Option<bool>,
     use_real_name: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -68,11 +73,13 @@ pub fn get_mldanbooru_tags(
     let sz = size.unwrap_or(448) as u32;
     let kr = keep_ratio.unwrap_or(false);
     let ur = use_real_name.unwrap_or(false);
-    let result = core_mldanbooru(&image, th, sz, kr, ur).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("ML-Danbooru failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        core_mldanbooru(&image, th, sz, kr, ur).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("ML-Danbooru failed: {}", e),
+            )
+        })
     })?;
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -88,6 +95,7 @@ pub fn get_deepgelbooru_tags(
     general_threshold: Option<f64>,
     character_threshold: Option<f64>,
     drop_overlap: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -97,11 +105,13 @@ pub fn get_deepgelbooru_tags(
     })?;
     let gt = general_threshold.unwrap_or(0.3) as f32;
     let ct = character_threshold.unwrap_or(0.3) as f32;
-    let result = core_deepgelbooru(&image, gt, ct, drop_overlap.unwrap_or(false)).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("DeepGelbooru failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        core_deepgelbooru(&image, gt, ct, drop_overlap.unwrap_or(false)).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("DeepGelbooru failed: {}", e),
+            )
+        })
     })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
@@ -122,6 +132,7 @@ pub fn get_wd14_tags(
     character_mcut_enabled: Option<bool>,
     no_underline: Option<bool>,
     drop_overlap: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -135,17 +146,19 @@ pub fn get_wd14_tags(
     let ct = character_threshold.unwrap_or(0.85) as f32;
     let cm = character_mcut_enabled.unwrap_or(false);
     let nu = no_underline.unwrap_or(false);
-    let result = core_wd14(
-        &image,
-        &model,
-        gt,
-        gm,
-        ct,
-        cm,
-        nu,
-        drop_overlap.unwrap_or(false),
-    )
-    .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e)))?;
+    let result = run_with_inference_options(inference_options, || {
+        core_wd14(
+            &image,
+            &model,
+            gt,
+            gm,
+            ct,
+            cm,
+            nu,
+            drop_overlap.unwrap_or(false),
+        )
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("WD14 failed: {}", e)))
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -163,6 +176,7 @@ pub fn get_camie_tags(
     thresholds: Option<HashMap<String, f64>>,
     no_underline: Option<bool>,
     drop_overlap: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -174,15 +188,17 @@ pub fn get_camie_tags(
     let mode_str = mode.unwrap_or_else(|| "balanced".to_string());
     let nu = no_underline.unwrap_or(false);
     let thresh_map = thresholds.map(|m| m.into_iter().map(|(k, v)| (k, v as f32)).collect());
-    let result = core_camie(
-        &image,
-        &model,
-        &mode_str,
-        thresh_map,
-        nu,
-        drop_overlap.unwrap_or(false),
-    )
-    .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e)))?;
+    let result = run_with_inference_options(inference_options, || {
+        core_camie(
+            &image,
+            &model,
+            &mode_str,
+            thresh_map,
+            nu,
+            drop_overlap.unwrap_or(false),
+        )
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("Camie failed: {}", e)))
+    })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
         general: vec_to_map(result.general),
@@ -209,6 +225,7 @@ pub async fn get_oppaioracle_tags(
     model_name: Option<String>,
     threshold: Option<f64>,
     no_underline: Option<bool>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<TagResult> {
     let image = crate::napi::open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -217,21 +234,23 @@ pub async fn get_oppaioracle_tags(
         )
     })?;
     let model = model_name.unwrap_or_else(|| "v1.1".to_string());
-    let result = core_oppaioracle(
-        &image,
-        &model,
-        threshold.map(|t| t as f32),
-        no_underline.unwrap_or(false),
-    )
-    .map_err(|e| match e {
-        crate::tagging::TaggingError::InvalidArgument(msg) => napi::Error::new(
-            napi::Status::InvalidArg,
-            format!("OppaiOracle failed: {}", msg),
-        ),
-        e => napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("OppaiOracle failed: {}", e),
-        ),
+    let result = run_with_inference_options(inference_options, || {
+        core_oppaioracle(
+            &image,
+            &model,
+            threshold.map(|t| t as f32),
+            no_underline.unwrap_or(false),
+        )
+        .map_err(|e| match e {
+            crate::tagging::TaggingError::InvalidArgument(msg) => napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("OppaiOracle failed: {}", msg),
+            ),
+            e => napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("OppaiOracle failed: {}", e),
+            ),
+        })
     })?;
     let rating = result.rest.get("rating").cloned().unwrap_or_default();
     Ok(TagResult {
