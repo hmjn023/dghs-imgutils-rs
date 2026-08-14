@@ -168,6 +168,47 @@ npm run build
 npm run build  # --dts フラグを含む
 ```
 
+### Intel NPU / GPU（XPU）
+
+このリポジトリは `ort` の動的ロードと OpenVINO Execution Provider を使います。Python APIを使うのではなく、公式 `onnxruntime-openvino` パッケージに含まれるネイティブ共有ライブラリだけをRust/Node.jsからロードします。
+
+まず、OpenVINO対応のONNX Runtime一式をプロジェクト内に展開します。
+
+```bash
+uv pip install --target .ort-runtime \
+  --python-version 3.13 --only-binary=:all: --no-deps \
+  onnxruntime-openvino==1.24.1
+
+export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
+```
+
+実行時にデバイスを選択します。`NPU` は Intel NPU、`GPU` は Intel XPU（GPU）です。
+
+```bash
+# Intel NPU
+export DGHS_ORT_DEVICE=NPU
+
+# Intel XPU/GPU。LinuxではIntel OpenCL ICDを明示する
+export DGHS_ORT_DEVICE=GPU
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
+```
+
+未設定時は `AUTO:NPU,GPU,CPU` で、NPU → GPU → CPUの順に選択します。アプリケーションを起動するプロセスに `ORT_DYLIB_PATH` と上記の環境変数を設定してください。GPUを使うLinux環境では、Intel GPUドライバーと `/etc/OpenCL/vendors/intel.icd` が必要です。
+
+```bash
+# ネイティブアドオンをビルド
+npm run build
+```
+
+動作確認用の最小モデルでRust側のセッション作成を確認できます。
+
+```bash
+cargo run --no-default-features --example intel_ep_probe -- \
+  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+```
+
+`onnxruntime-openvino` の共有ライブラリは、[ONNX Runtime OpenVINO Execution Provider](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html) の公式配布物です。別のOpenVINO共有ライブラリを混在させず、同じ `capi` ディレクトリのファイル一式を使ってください。
+
 ## ドキュメント
 
 ```bash

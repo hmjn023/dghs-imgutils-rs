@@ -168,19 +168,52 @@ npm run build
 npm run build  # includes --dts flag
 ```
 
-### GPU (CUDA) support
+### ONNX Runtime loading
 
-By default the `ort` crate downloads a prebuilt ONNX Runtime static library. To use a system ONNX Runtime with a working CUDA execution provider, build with dynamic linking:
+The `ort` configuration in this project uses dynamic loading, so it does not download or statically link a bundled ONNX Runtime. `ORT_DYLIB_PATH` must point to a compatible `libonnxruntime.so`; the execution-provider shared libraries must be available beside it. See the Intel OpenVINO section below for the tested distribution.
+
+For CUDA or TensorRT, use an ONNX Runtime build that contains the matching provider libraries and set `ORT_DYLIB_PATH` to that runtime before starting the application.
+
+### Intel NPU / GPU (XPU) support
+
+This project uses the `ort` dynamic loader with the OpenVINO Execution Provider. It does not call a Python API; the native shared libraries included in the official `onnxruntime-openvino` package are loaded directly by Rust/Node.js.
+
+Extract the OpenVINO-enabled ONNX Runtime distribution into the project:
 
 ```bash
-ORT_PREFER_DYNAMIC_LINK=1 ORT_LIB_PATH=/usr/lib npm run build
+uv pip install --target .ort-runtime \
+  --python-version 3.13 --only-binary=:all: --no-deps \
+  onnxruntime-openvino==1.24.1
+
+export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
 ```
 
-Requirements:
-- `libonnxruntime.so.1` and `libonnxruntime_providers_cuda.so` must be available (e.g. in `/usr/lib` or via `LD_LIBRARY_PATH`).
-- NVIDIA drivers and the matching CUDA runtime must be installed.
+Select the device when starting the application. `NPU` selects the Intel NPU and `GPU` selects the Intel XPU/GPU.
 
-For CPU-only inference, build normally without these environment variables.
+```bash
+# Intel NPU
+export DGHS_ORT_DEVICE=NPU
+
+# Intel XPU/GPU. Select the Intel OpenCL ICD on Linux.
+export DGHS_ORT_DEVICE=GPU
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
+```
+
+When unset, the library uses `AUTO:NPU,GPU,CPU` and tries NPU, then GPU, then CPU. Set `ORT_DYLIB_PATH` and the device variables in the process that runs the application. GPU execution on Linux requires the Intel GPU driver and `/etc/OpenCL/vendors/intel.icd`.
+
+```bash
+# Build the native addon
+npm run build
+```
+
+Use the included minimal probe to verify session creation:
+
+```bash
+cargo run --no-default-features --example intel_ep_probe -- \
+  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+```
+
+The `onnxruntime-openvino` shared libraries come from the [official ONNX Runtime OpenVINO Execution Provider distribution](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html). Keep the files from the same `capi` directory together and do not mix them with a different OpenVINO installation.
 
 ## Documentation
 

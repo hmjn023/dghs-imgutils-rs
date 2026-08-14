@@ -4,4 +4,5 @@
 /index.js
 /index.d.ts
 /package-lock.json
+.ort-runtime/
 .worktree/

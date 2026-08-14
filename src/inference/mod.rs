@@ -13,9 +13,13 @@ pub use yolo::{
 use once_cell::sync::Lazy;
 use ort::session::Session;
 use std::collections::HashMap;
+use std::env;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
+
+const OPENVINO_DEVICE_ENV: &str = "DGHS_ORT_DEVICE";
+const DEFAULT_OPENVINO_DEVICE: &str = "AUTO:NPU,GPU,CPU";
 
 /// ONNX セッションのキャッシュ。
 /// モデルファイルパスをキーとして、作成済みセッションを共有する。
@@ -31,10 +35,12 @@ pub fn init_onnx_runtime() -> Result<(), InferenceError> {
     Ok(())
 }
 
+/// `DGHS_ORT_DEVICE` で指定された OpenVINO デバイスを優先して、
 /// 指定されたモデルファイルのパスから ONNX Runtime の Session を作成します。
 ///
-/// システムで利用可能な最高の実行プロバイダ（CUDA、TensorRT 等）を自動的に検出し、
-/// 最適化レベルを最大にしてバインドしたセッションを返します。
+/// `DGHS_ORT_DEVICE` には `GPU`（Intel XPU）、`NPU`、`CPU`、または
+/// `AUTO:GPU,NPU,CPU` のような OpenVINO のデバイス指定を設定できます。
+/// 未設定時は `AUTO:NPU,GPU,CPU`（NPU 優先）を使用します。
 ///
 /// # 引数
 ///
@@ -89,11 +95,15 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
     }
 
     // 4. OpenVINO (Intel CPU/GPU/NPU)
-    let openvino = OpenVINO::default();
+    let device_type = env::var(OPENVINO_DEVICE_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_OPENVINO_DEVICE.to_owned());
+    let openvino = OpenVINO::default().with_device_type(&device_type);
     match openvino.is_available() {
         Ok(true) => {
-            info!("[ort] OpenVINO EP is available! Enabling Intel NPU/GPU/CPU acceleration.");
-            providers.push(openvino.build());
+            info!("[ort] OpenVINO EP is available! Enabling device type {device_type}.");
+            providers.push(openvino.build().error_on_failure());
         }
         Ok(false) => {}
         Err(e) => {
