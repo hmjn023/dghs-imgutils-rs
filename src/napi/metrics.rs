@@ -201,3 +201,61 @@ pub fn lpips_clustering(
     })?;
     Ok(clusters.into_iter().map(|v| v as i32).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::{Backend, Precision, current_inference_options};
+
+    fn empty_options() -> NapiInferenceOptions {
+        NapiInferenceOptions {
+            backend: None,
+            precision: None,
+            device_id: None,
+            openvino_device_type: None,
+            vitis_config_file: None,
+            ep_cache_dir: None,
+            migraphx_int8_calibration_table: None,
+            migraphx_exhaustive_tune: None,
+        }
+    }
+
+    #[test]
+    fn default_inference_options_leave_operation_result_unchanged() {
+        let result = run_with_inference_options(None, || Ok::<_, napi::Error>(42_u32)).unwrap();
+
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn partial_inference_options_are_visible_inside_the_operation() {
+        let mut input = empty_options();
+        input.backend = Some("cpu".to_owned());
+        input.precision = Some("fp32".to_owned());
+        input.device_id = Some(7);
+
+        let options = run_with_inference_options(Some(input), || {
+            current_inference_options()
+                .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+        })
+        .unwrap();
+
+        assert_eq!(options.backend, Backend::Cpu);
+        assert_eq!(options.precision, Precision::Fp32);
+        assert_eq!(options.device_id, 7);
+    }
+
+    #[test]
+    fn operation_errors_are_propagated_without_swallowing_them() {
+        let error = run_with_inference_options(None, || {
+            Err::<(), _>(napi::Error::new(
+                napi::Status::GenericFailure,
+                "sentinel inference failure",
+            ))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.status, napi::Status::GenericFailure);
+        assert!(error.reason.contains("sentinel inference failure"));
+    }
+}

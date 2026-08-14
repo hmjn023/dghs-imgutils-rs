@@ -220,13 +220,16 @@ fn create_onnx_session_from_key(
         Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
 
     match options.backend {
-        Backend::Auto => configure_automatic_providers(&mut builder, options)?,
-        Backend::Cpu => {}
+        Backend::Auto => {
+            validate_provider_precision(Backend::Auto, options.precision)?;
+            configure_automatic_providers(&mut builder, options)?;
+        }
+        Backend::Cpu => validate_provider_precision(Backend::Cpu, options.precision)?,
         Backend::AmdGpu => configure_amd_gpu(&mut builder, options)?,
         Backend::AmdNpu => configure_amd_npu(&mut builder, options, key)?,
-        Backend::Cuda => configure_cuda(&mut builder)?,
-        Backend::TensorRt => configure_tensorrt(&mut builder)?,
-        Backend::DirectMl => configure_directml(&mut builder)?,
+        Backend::Cuda => configure_cuda(&mut builder, options)?,
+        Backend::TensorRt => configure_tensorrt(&mut builder, options)?,
+        Backend::DirectMl => configure_directml(&mut builder, options)?,
         Backend::OpenVino => configure_openvino(&mut builder, options)?,
     }
 
@@ -384,6 +387,20 @@ fn configure_automatic_providers(
     Ok(())
 }
 
+fn validate_provider_precision(
+    backend: Backend,
+    precision: Precision,
+) -> Result<(), InferenceError> {
+    if matches!(precision, Precision::Auto | Precision::Fp32) {
+        return Ok(());
+    }
+
+    Err(InferenceError::ModelUnsupported(format!(
+        "{} does not accept an explicit {} precision request; use a model exported for that precision or Precision::Auto",
+        backend, precision
+    )))
+}
+
 fn configure_amd_gpu(
     builder: &mut ort::session::builder::SessionBuilder,
     options: &SessionOptions,
@@ -504,14 +521,16 @@ fn configure_amd_npu(
 
 fn configure_cuda(
     builder: &mut ort::session::builder::SessionBuilder,
+    options: &SessionOptions,
 ) -> Result<(), InferenceError> {
     #[cfg(feature = "cuda")]
     {
+        validate_provider_precision(Backend::Cuda, options.precision)?;
         register_strict_provider(builder, ort::ep::CUDA::default(), Backend::Cuda)
     }
     #[cfg(not(feature = "cuda"))]
     {
-        let _ = builder;
+        let _ = (builder, options);
         Err(InferenceError::BackendUnavailable(
             "CUDA support is disabled; rebuild with --features cuda".to_owned(),
         ))
@@ -520,14 +539,16 @@ fn configure_cuda(
 
 fn configure_tensorrt(
     builder: &mut ort::session::builder::SessionBuilder,
+    options: &SessionOptions,
 ) -> Result<(), InferenceError> {
     #[cfg(feature = "tensorrt")]
     {
+        validate_provider_precision(Backend::TensorRt, options.precision)?;
         register_strict_provider(builder, ort::ep::TensorRT::default(), Backend::TensorRt)
     }
     #[cfg(not(feature = "tensorrt"))]
     {
-        let _ = builder;
+        let _ = (builder, options);
         Err(InferenceError::BackendUnavailable(
             "TensorRT support is disabled; rebuild with --features tensorrt".to_owned(),
         ))
@@ -536,14 +557,16 @@ fn configure_tensorrt(
 
 fn configure_directml(
     builder: &mut ort::session::builder::SessionBuilder,
+    options: &SessionOptions,
 ) -> Result<(), InferenceError> {
     #[cfg(feature = "directml")]
     {
+        validate_provider_precision(Backend::DirectMl, options.precision)?;
         register_strict_provider(builder, ort::ep::DirectML::default(), Backend::DirectMl)
     }
     #[cfg(not(feature = "directml"))]
     {
-        let _ = builder;
+        let _ = (builder, options);
         Err(InferenceError::BackendUnavailable(
             "DirectML support is disabled; rebuild with --features directml".to_owned(),
         ))
@@ -556,6 +579,7 @@ fn configure_openvino(
 ) -> Result<(), InferenceError> {
     #[cfg(feature = "openvino")]
     {
+        validate_provider_precision(Backend::OpenVino, options.precision)?;
         let device_type = options
             .openvino_device_type
             .clone()
@@ -639,30 +663,42 @@ pub fn get_or_create_session_with_options<P: AsRef<Path>>(
 ) -> Result<Arc<Mutex<Session>>, InferenceError> {
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
 
+    {
+        let mut cache = SESSION_CACHE.lock().map_err(|e| {
+            InferenceError::Initialization(format!("Session cache lock poisoned: {e}"))
+        })?;
+
+        if let Some(session) = cache.get(&key) {
+            return Ok(Arc::clone(session));
+        }
+
+        // A model path can be replaced in place by a downloader or deployment
+        // tool. Drop stale entries for that path after the content hash changes;
+        // callers holding an old Arc may finish using it, but new lookups cannot
+        // retain an obsolete compiled graph indefinitely.
+        if cache.keys().any(|cached| {
+            cached.model_path == key.model_path && cached.model_sha256 != key.model_sha256
+        }) {
+            cache.retain(|cached, _| {
+                cached.model_path != key.model_path || cached.model_sha256 == key.model_sha256
+            });
+        }
+    }
+
+    // Compilation can take seconds or minutes for provider-backed sessions.
+    // Do not hold the global cache mutex while ONNX Runtime compiles the graph.
+    let created_session = Arc::new(Mutex::new(create_onnx_session_from_key(&key, options)?));
+
     let mut cache = SESSION_CACHE
         .lock()
         .map_err(|e| InferenceError::Initialization(format!("Session cache lock poisoned: {e}")))?;
-
     if let Some(session) = cache.get(&key) {
+        // Another thread may have compiled and inserted the same key while this
+        // thread was compiling. Reuse the canonical entry in that case.
         return Ok(Arc::clone(session));
     }
-
-    // A model path can be replaced in place by a downloader or deployment
-    // tool. Drop stale entries for that path after the content hash changes;
-    // callers holding an old Arc may finish using it, but new lookups cannot
-    // retain an obsolete compiled graph indefinitely.
-    if cache.keys().any(|cached| {
-        cached.model_path == key.model_path && cached.model_sha256 != key.model_sha256
-    }) {
-        cache.retain(|cached, _| {
-            cached.model_path != key.model_path || cached.model_sha256 == key.model_sha256
-        });
-    }
-
-    let session = create_onnx_session_from_key(&key, options)?;
-    let session = Arc::new(Mutex::new(session));
-    cache.insert(key, Arc::clone(&session));
-    Ok(session)
+    cache.insert(key, Arc::clone(&created_session));
+    Ok(created_session)
 }
 
 /// Returns a cached session after validating model deployment metadata.
@@ -736,6 +772,8 @@ mod tests {
     impl DeviceEnvGuard {
         fn set(value: Option<&str>) -> Self {
             let previous = env::var_os(OPENVINO_DEVICE_ENV);
+            // Tests serialize process-wide environment access with
+            // DEVICE_ENV_LOCK, making this scoped mutation safe here.
             unsafe {
                 match value {
                     Some(value) => env::set_var(OPENVINO_DEVICE_ENV, value),
@@ -748,6 +786,8 @@ mod tests {
 
     impl Drop for DeviceEnvGuard {
         fn drop(&mut self) {
+            // Restore the value while DEVICE_ENV_LOCK is still held by the
+            // owning test, so no concurrent test observes a partial change.
             unsafe {
                 match self.previous.take() {
                     Some(value) => env::set_var(OPENVINO_DEVICE_ENV, value),
@@ -802,6 +842,16 @@ mod tests {
     #[test]
     fn test_automatic_provider_registration_failure_allows_cpu_fallback() {
         assert!(provider_registration_error("provider unavailable", false).is_ok());
+    }
+
+    #[test]
+    fn non_migraphx_backends_reject_unapplied_precision_requests() {
+        assert!(validate_provider_precision(Backend::Cuda, Precision::Fp32).is_ok());
+        assert!(validate_provider_precision(Backend::Cpu, Precision::Auto).is_ok());
+        assert!(matches!(
+            validate_provider_precision(Backend::Cuda, Precision::Fp16),
+            Err(InferenceError::ModelUnsupported(message)) if message.contains("fp16")
+        ));
     }
 
     #[test]

@@ -9,11 +9,12 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 const SAFE_REPO: &str = "mf666/shit-checker";
@@ -22,23 +23,25 @@ const SAFE_SIZE: u32 = 384;
 const SAFE_LABELS: &[&str] = &["polluted", "safe"];
 
 struct SafeModel {
-    session: SharedSession,
+    model_path: PathBuf,
 }
 
-static SAFE_CACHE: Lazy<Mutex<Option<SafeModel>>> = Lazy::new(|| Mutex::new(None));
+static SAFE_CACHE: Lazy<Mutex<HashMap<String, SafeModel>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn ensure_safe_model(model_name: &str) -> Result<(), InferenceError> {
-    let mut cache = SAFE_CACHE.lock().unwrap();
-    if cache.is_some() {
+    if SAFE_CACHE.lock().unwrap().contains_key(model_name) {
         return Ok(());
     }
 
     let filename = format!("{}.onnx", model_name);
     let model_path = hf_hub_download(SAFE_REPO, &filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    let session = get_or_create_session(&model_path)?;
 
-    *cache = Some(SafeModel { session });
+    SAFE_CACHE
+        .lock()
+        .unwrap()
+        .insert(model_name.to_string(), SafeModel { model_path });
     Ok(())
 }
 
@@ -72,10 +75,15 @@ pub fn safe_check_score(
     ensure_safe_model(model)?;
 
     let tensor = preprocess_safe_image(path)?;
-    let mut cache = SAFE_CACHE.lock().unwrap();
-    let entry = cache.as_mut().unwrap();
+    let model_path = SAFE_CACHE
+        .lock()
+        .unwrap()
+        .get(model)
+        .map(|entry| entry.model_path.clone())
+        .ok_or_else(|| InferenceError::Initialization("Model not found in cache".to_string()))?;
 
-    let mut session = lock_session(&entry.session)?;
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
     let outputs = session
         .run(ort::inputs!["input" => ort::value::Tensor::from_array(tensor)?])
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
@@ -106,4 +114,30 @@ pub fn safe_check(
         .map(|(k, _)| k.clone())
         .ok_or_else(|| InferenceError::InvalidShape("Empty safe output".to_string()))?;
     Ok((top, scores))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::{Backend, Precision, SessionKey, SessionOptions};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn cached_model_path_resolves_distinct_backend_session_keys() {
+        let mut model = NamedTempFile::new().unwrap();
+        model.write_all(b"model").unwrap();
+
+        let cpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::Cpu).with_precision(Precision::Fp32),
+        )
+        .unwrap();
+        let gpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::AmdGpu).with_precision(Precision::Fp16),
+        )
+        .unwrap();
+
+        assert_ne!(cpu, gpu);
+    }
 }

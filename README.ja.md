@@ -178,6 +178,8 @@ addonをビルドできます。
 git clone https://github.com/hmjn023/dghs-imgutils-rs.git
 cd dghs-imgutils-rs
 mise install
+export HF_HOME="$PWD/.cache/huggingface"
+export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
 cargo test --lib --no-default-features
 npm install
@@ -287,17 +289,18 @@ defaultとして環境変数より優先され、N-API関数の最後の`inferen
 
 | 変数 | 例 | 用途 |
 |---|---|---|
-| `DGHS_BACKEND` | `amd-gpu` | `auto`、`cpu`、`openvino`、`cuda`、`tensorrt`、`amd-gpu`、`amd-npu` |
+| `DGHS_BACKEND` | `amd-gpu` | `auto`、`cpu`、`openvino`、`cuda`、`tensorrt`、`directml`、`amd-gpu`、`amd-npu` |
 | `DGHS_PRECISION` | `fp16` | `auto`、`fp32`、`fp16`、`bf16`、`int8` |
 | `DGHS_DEVICE_ID` | `0` | GPU/providerのdevice ordinal |
 | `DGHS_ORT_DEVICE` | `GPU` | OpenVINO device policy（`CPU`、`GPU`、`NPU`、`AUTO`など） |
 | `DGHS_VITIS_CONFIG` | `/opt/vitis-ai/model.json` | Vitis-AI compiler/provider設定（必須） |
-| `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | provider compile/cache directory |
+| `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | Vitis-AIのprovider compile/cache directory（AMD NPU専用、MIGraphXでは使用しません） |
 | `DGHS_MIGRAPHX_INT8_CALIBRATION_TABLE` | `/opt/models/calibration.table` | MIGraphX INT8 calibration table |
 | `DGHS_MIGRAPHX_EXHAUSTIVE_TUNE` | `true` | MIGraphX exhaustive tuningを有効化 |
 
-workerやRuntime profileごとに`DGHS_EP_CACHE_DIR`を分けてください。cache identityには
-model hash、backend、precision、device、runtime、provider fingerprintが含まれます。
+Vitis-AI workerやRuntime profileごとに`DGHS_EP_CACHE_DIR`を分けてください。MIGraphXは
+provider固有の設定を使います。cache identityにはmodel hash、backend、precision、device、
+runtime、provider fingerprintが含まれます。
 
 ### AMD Radeon GPU / XDNA2 NPU worker
 
@@ -312,7 +315,6 @@ cargo build --release --no-default-features --features amd-gpu
 export DGHS_BACKEND=amd-gpu
 export DGHS_PRECISION=fp16       # fp32, fp16, int8
 export ORT_DYLIB_PATH=/opt/ort-migraphx/lib/libonnxruntime.so
-export DGHS_EP_CACHE_DIR=/var/cache/dghs-imgutils/migraphx
 
 # AMD XDNA2 / Vitis-AI worker（experimental）
 cargo build --release --no-default-features --features amd-npu
@@ -480,7 +482,8 @@ runtime matrixで検証します。
 workerのprovider能力を表示し、任意でstrict sessionを作成するprobeです。
 
 ```bash
-cargo run --no-default-features --example ep_probe -- path/to/model.onnx
+cargo run --no-default-features --features amd-npu --example ep_probe -- \
+  path/to/model.onnx
 ```
 
 build wiringとpolicy logicの検証matrix:

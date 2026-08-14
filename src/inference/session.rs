@@ -2,11 +2,26 @@
 
 use crate::inference::InferenceError;
 use crate::inference::backend::SessionOptions;
+use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ModelFileIdentity {
+    canonical_path: PathBuf,
+    file_size: u64,
+    modified: Option<(u64, u32)>,
+}
+
+/// Memoizes content hashes while a model's cheap filesystem identity is unchanged.
+static MODEL_HASH_CACHE: Lazy<Mutex<HashMap<ModelFileIdentity, String>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Identity of a compiled ONNX Runtime session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,6 +36,7 @@ pub struct SessionKey {
 }
 
 impl SessionKey {
+    /// Creates a session identity from the canonical model path and worker options.
     pub fn from_path(
         path: impl AsRef<Path>,
         options: &SessionOptions,
@@ -54,7 +70,31 @@ impl SessionKey {
 
 /// Computes a content hash rather than relying on a mutable model path.
 pub fn model_sha256(path: impl AsRef<Path>) -> Result<String, InferenceError> {
-    let mut file = File::open(path)?;
+    let canonical_path = fs::canonicalize(path.as_ref())?;
+    let metadata = fs::metadata(&canonical_path)?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| (duration.as_secs(), duration.subsec_nanos()));
+    let identity = ModelFileIdentity {
+        canonical_path: canonical_path.clone(),
+        file_size: metadata.len(),
+        modified,
+    };
+
+    if let Some(hash) = MODEL_HASH_CACHE
+        .lock()
+        .map_err(|error| {
+            InferenceError::Initialization(format!("Model hash cache lock poisoned: {error}"))
+        })?
+        .get(&identity)
+        .cloned()
+    {
+        return Ok(hash);
+    }
+
+    let mut file = File::open(&canonical_path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
 
@@ -66,11 +106,20 @@ pub fn model_sha256(path: impl AsRef<Path>) -> Result<String, InferenceError> {
         hasher.update(&buffer[..read]);
     }
 
-    Ok(hasher
+    let hash = hasher
         .finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
-        .collect())
+        .collect::<String>();
+
+    MODEL_HASH_CACHE
+        .lock()
+        .map_err(|error| {
+            InferenceError::Initialization(format!("Model hash cache lock poisoned: {error}"))
+        })?
+        .insert(identity, hash.clone());
+
+    Ok(hash)
 }
 
 /// Identifies the dynamically loaded ONNX Runtime and relevant worker inputs.
@@ -114,6 +163,19 @@ mod tests {
         let second = model_sha256(file.path()).unwrap();
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn model_hash_is_reused_for_unchanged_file_identity() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"unchanged").unwrap();
+
+        let first = model_sha256(file.path()).unwrap();
+        let second = model_sha256(file.path()).unwrap();
+
+        assert_eq!(first, second);
+        let cache = MODEL_HASH_CACHE.lock().unwrap();
+        assert!(cache.values().any(|hash| hash == &first));
     }
 
     #[test]

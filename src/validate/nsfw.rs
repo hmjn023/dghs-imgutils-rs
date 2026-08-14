@@ -9,18 +9,19 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 const NSFW_REPO: &str = "deepghs/imgutils-models";
 const NSFW_LABELS: &[&str] = &["drawings", "hentai", "neutral", "porn", "sexy"];
 
 struct NsfwModel {
-    session: SharedSession,
+    model_path: PathBuf,
     size: u32,
 }
 
@@ -40,12 +41,10 @@ fn ensure_nsfw_model(model_name: &str) -> Result<(), InferenceError> {
 
     let model_path = hf_hub_download(NSFW_REPO, filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    let session = get_or_create_session(&model_path)?;
-
     NSFW_CACHE
         .lock()
         .unwrap()
-        .insert(model_name.to_string(), NsfwModel { session, size });
+        .insert(model_name.to_string(), NsfwModel { model_path, size });
     Ok(())
 }
 
@@ -62,9 +61,13 @@ pub fn nsfw_pred_score(
     let img = image::open(path).map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
     let rgb = force_image_background(&img, [255, 255, 255]);
 
-    let mut cache = NSFW_CACHE.lock().unwrap();
-    let entry = cache.get_mut(model).unwrap();
-    let size = entry.size;
+    let (model_path, size) = {
+        let cache = NSFW_CACHE.lock().unwrap();
+        let entry = cache.get(model).ok_or_else(|| {
+            InferenceError::Initialization("Model not found in cache".to_string())
+        })?;
+        (entry.model_path.clone(), entry.size)
+    };
 
     // NEAREST リサイズ（nsfw.py と同一）
     let resized = rgb.resize_exact(size, size, FilterType::Nearest);
@@ -78,7 +81,8 @@ pub fn nsfw_pred_score(
         tensor[[0, y as usize, x as usize, 2]] = pixel[2] as f32 / 255.0;
     }
 
-    let mut session = lock_session(&entry.session)?;
+    let session = get_or_create_session(&model_path)?;
+    let mut session = lock_session(&session)?;
     let outputs = session
         .run(ort::inputs!["input_1" => ort::value::Tensor::from_array(tensor.clone())?])
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
@@ -110,4 +114,30 @@ pub fn nsfw_pred(
         .map(|(k, _)| k.clone())
         .ok_or_else(|| InferenceError::InvalidShape("Empty NSFW output".to_string()))?;
     Ok((top, scores))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::{Backend, Precision, SessionKey, SessionOptions};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn cached_model_path_resolves_distinct_backend_session_keys() {
+        let mut model = NamedTempFile::new().unwrap();
+        model.write_all(b"model").unwrap();
+
+        let cpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::Cpu).with_precision(Precision::Fp32),
+        )
+        .unwrap();
+        let gpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::AmdGpu).with_precision(Precision::Fp16),
+        )
+        .unwrap();
+
+        assert_ne!(cpu, gpu);
+    }
 }

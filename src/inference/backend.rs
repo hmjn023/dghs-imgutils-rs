@@ -102,6 +102,7 @@ pub enum Precision {
 }
 
 impl Precision {
+    /// Returns the stable configuration string used in manifests and cache keys.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -410,6 +411,7 @@ pub struct ModelProfile {
 }
 
 impl ModelProfile {
+    /// Creates a scheduler-facing profile with backend and precision preferences.
     pub fn new(
         name: impl Into<String>,
         preferred_backends: impl Into<Vec<Backend>>,
@@ -668,6 +670,8 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             for (name, value) in self.previous.drain(..) {
+                // Tests serialize environment access with ENV_LOCK, so these
+                // process-wide mutations cannot race another test in this module.
                 unsafe {
                     match value {
                         Some(value) => std::env::set_var(name, value),
@@ -695,6 +699,8 @@ mod tests {
     fn session_options_read_worker_environment() {
         let _lock = ENV_LOCK.lock().unwrap();
         let _env = EnvGuard::capture();
+        // Tests serialize environment access with ENV_LOCK before mutating the
+        // process-wide variables used by SessionOptions::from_env.
         unsafe {
             std::env::set_var(BACKEND_ENV, "amd-gpu");
             std::env::set_var(PRECISION_ENV, "fp16");

@@ -16,15 +16,16 @@
 use crate::edge::canny::EdgeError;
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{SharedSession, get_or_create_session, lock_session};
+use crate::inference::{get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use ndarray::Array4;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
-static LINEART_CACHE: Lazy<Mutex<HashMap<String, SharedSession>>> =
+static LINEART_CACHE: Lazy<Mutex<HashMap<String, PathBuf>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Python の `resize_image(img, resolution, align=64)` と等価なリサイズを行います。
@@ -53,11 +54,11 @@ pub(crate) fn resize_image_align(img: &DynamicImage, resolution: u32, align: u32
     img.resize_exact(new_w, new_h, filter)
 }
 
-fn load_lineart_session(coarse: bool) -> Result<SharedSession, EdgeError> {
+fn load_lineart_model_path(coarse: bool) -> Result<PathBuf, EdgeError> {
     let key = if coarse { "coarse" } else { "normal" };
     {
-        if let Some(session) = LINEART_CACHE.lock().unwrap().get(key) {
-            return Ok(session.clone());
+        if let Some(model_path) = LINEART_CACHE.lock().unwrap().get(key) {
+            return Ok(model_path.clone());
         }
     }
     let filename = if coarse {
@@ -67,13 +68,11 @@ fn load_lineart_session(coarse: bool) -> Result<SharedSession, EdgeError> {
     };
     let model_path = hf_hub_download("deepghs/imgutils-models", filename, None, None)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let session =
-        get_or_create_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
     LINEART_CACHE
         .lock()
         .unwrap()
-        .insert(key.to_string(), session.clone());
-    Ok(session)
+        .insert(key.to_string(), model_path.clone());
+    Ok(model_path)
 }
 
 /// Lineart モデルによるエッジマスク（float32 [H, W]）を返します。
@@ -97,7 +96,9 @@ pub fn get_edge_by_lineart(
     // [0, 1] 正規化 + CHW
     let tensor = image_to_tensor_01(&resized, rw, rh);
 
-    let session = load_lineart_session(coarse)?;
+    let model_path = load_lineart_model_path(coarse)?;
+    let session =
+        get_or_create_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
     let mut session = lock_session(&session).map_err(|e| EdgeError::Processing(e.to_string()))?;
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
@@ -221,4 +222,30 @@ pub(crate) fn blend_edge_mask(
         }
     }
     DynamicImage::ImageRgb8(canvas)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::{Backend, Precision, SessionKey, SessionOptions};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn cached_model_path_resolves_distinct_backend_session_keys() {
+        let mut model = NamedTempFile::new().unwrap();
+        model.write_all(b"model").unwrap();
+
+        let cpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::Cpu).with_precision(Precision::Fp32),
+        )
+        .unwrap();
+        let gpu = SessionKey::from_path(
+            model.path(),
+            &SessionOptions::for_backend(Backend::AmdGpu).with_precision(Precision::Fp16),
+        )
+        .unwrap();
+
+        assert_ne!(cpu, gpu);
+    }
 }

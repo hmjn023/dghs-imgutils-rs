@@ -177,6 +177,8 @@ toolchain. If `mise` is installed, the pinned tools can be installed with:
 git clone https://github.com/hmjn023/dghs-imgutils-rs.git
 cd dghs-imgutils-rs
 mise install
+export HF_HOME="$PWD/.cache/huggingface"
+export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
 cargo test --lib --no-default-features
 npm install
@@ -295,18 +297,19 @@ These variables are read when a session is created. A programmatic
 
 | Variable | Example | Purpose |
 |---|---|---|
-| `DGHS_BACKEND` | `amd-gpu` | `auto`, `cpu`, `openvino`, `cuda`, `tensorrt`, `amd-gpu`, or `amd-npu` |
+| `DGHS_BACKEND` | `amd-gpu` | `auto`, `cpu`, `openvino`, `cuda`, `tensorrt`, `directml`, `amd-gpu`, or `amd-npu` |
 | `DGHS_PRECISION` | `fp16` | `auto`, `fp32`, `fp16`, `bf16`, or `int8` |
 | `DGHS_DEVICE_ID` | `0` | GPU/provider device ordinal |
 | `DGHS_ORT_DEVICE` | `GPU` | OpenVINO device policy (`CPU`, `GPU`, `NPU`, `AUTO`, ...) |
 | `DGHS_VITIS_CONFIG` | `/opt/vitis-ai/model.json` | Required Vitis-AI compiler/provider configuration |
-| `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | Provider compilation/cache directory |
+| `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | Vitis-AI provider compilation/cache directory (AMD NPU only; not used by MIGraphX) |
 | `DGHS_MIGRAPHX_INT8_CALIBRATION_TABLE` | `/opt/models/calibration.table` | MIGraphX INT8 calibration table |
 | `DGHS_MIGRAPHX_EXHAUSTIVE_TUNE` | `true` | Enable MIGraphX exhaustive tuning |
 
-Use separate `DGHS_EP_CACHE_DIR` values for separate workers and runtime
-profiles. Cache identities include the model hash, backend, precision, device,
-runtime, and provider fingerprints.
+Use separate `DGHS_EP_CACHE_DIR` values for separate Vitis-AI workers and
+runtime profiles. MIGraphX uses its provider-specific options instead. Cache
+identities include the model hash, backend, precision, device, runtime, and
+provider fingerprints.
 
 ### AMD Radeon GPU / XDNA2 NPU workers
 
@@ -322,7 +325,6 @@ cargo build --release --no-default-features --features amd-gpu
 export DGHS_BACKEND=amd-gpu
 export DGHS_PRECISION=fp16       # fp32, fp16, or int8
 export ORT_DYLIB_PATH=/opt/ort-migraphx/lib/libonnxruntime.so
-export DGHS_EP_CACHE_DIR=/var/cache/dghs-imgutils/migraphx
 
 # AMD XDNA2 / Vitis-AI worker (experimental)
 cargo build --release --no-default-features --features amd-npu
@@ -504,7 +506,8 @@ For example:
 Print the worker capability matrix and optionally create a strict session with:
 
 ```bash
-cargo run --no-default-features --example ep_probe -- path/to/model.onnx
+cargo run --no-default-features --features amd-npu --example ep_probe -- \
+  path/to/model.onnx
 ```
 
 The build-only validation matrix is:

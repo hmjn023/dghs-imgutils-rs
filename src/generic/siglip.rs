@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use image::DynamicImage;
@@ -9,13 +10,13 @@ use crate::generic::GenericError;
 use crate::generic::clip::SimpleTokenizer;
 use crate::hub::hf_hub_download;
 use crate::image::{force_image_background, to_ndarray_chw};
-use crate::inference::{SharedSession, get_or_create_session, lock_session};
+use crate::inference::{get_or_create_session, lock_session};
 
 const DEFAULT_REPO_ID: &str = "deepghs/siglip_onnx";
 
 struct SigLIPModelEntry {
-    image_encoder: SharedSession,
-    text_encoder: SharedSession,
+    image_encoder_path: PathBuf,
+    text_encoder_path: PathBuf,
     logit_scale: f32,
     logit_bias: f32,
     input_size: u32,
@@ -53,12 +54,9 @@ fn ensure_siglip_model(repo_id: &str, model_name: &str) -> Result<(), GenericErr
     let logit_bias = meta["logit_bias"].as_f64().unwrap_or(0.0) as f32;
     let input_size = meta["input_size"].as_u64().unwrap_or(224) as u32;
 
-    let image_encoder = get_or_create_session(&image_encoder_path)?;
-    let text_encoder = get_or_create_session(&text_encoder_path)?;
-
     let entry = SigLIPModelEntry {
-        image_encoder,
-        text_encoder,
+        image_encoder_path,
+        text_encoder_path,
         logit_scale,
         logit_bias,
         input_size,
@@ -92,13 +90,15 @@ pub fn siglip_image_encode(
     ensure_siglip_model(repo, model_name)?;
 
     let key = format!("{}/{}", repo, model_name);
-    let mut cache = SIGLIP_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let (image_encoder_path, size) = {
+        let cache = SIGLIP_CACHE.lock().unwrap();
+        let entry = cache
+            .get(&key)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        (entry.image_encoder_path.clone(), entry.input_size)
+    };
 
     let n = images.len();
-    let size = entry.input_size;
     let mut batch = Array4::<f32>::zeros((n, 3, size as usize, size as usize));
     for (i, img) in images.iter().enumerate() {
         let tensor = preprocess_siglip_image(img, size)?;
@@ -107,7 +107,8 @@ pub fn siglip_image_encode(
             .assign(&tensor.slice(ndarray::s![0, .., .., ..]));
     }
 
-    let mut image_encoder = lock_session(&entry.image_encoder)?;
+    let image_encoder = get_or_create_session(&image_encoder_path)?;
+    let mut image_encoder = lock_session(&image_encoder)?;
     let outputs = image_encoder.run(ort::inputs![
         "pixel_values" => ort::value::Tensor::from_array(batch)?
     ])?;
@@ -141,10 +142,13 @@ pub fn siglip_text_encode(
     ensure_siglip_model(repo, model_name)?;
 
     let key = format!("{}/{}", repo, model_name);
-    let mut cache = SIGLIP_CACHE.lock().unwrap();
-    let entry = cache
-        .get_mut(&key)
-        .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+    let text_encoder_path = {
+        let cache = SIGLIP_CACHE.lock().unwrap();
+        let entry = cache
+            .get(&key)
+            .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
+        entry.text_encoder_path.clone()
+    };
 
     let tok_path = hf_hub_download(repo, &format!("{}/tokenizer.json", model_name), None, None)?;
     let tokenizer = SimpleTokenizer::from_tokenizer_json(&tok_path)?;
@@ -160,7 +164,8 @@ pub fn siglip_text_encode(
         }
     }
 
-    let mut text_encoder = lock_session(&entry.text_encoder)?;
+    let text_encoder = get_or_create_session(&text_encoder_path)?;
+    let mut text_encoder = lock_session(&text_encoder)?;
     let outputs = text_encoder.run(ort::inputs![
         "input_ids" => ort::value::Tensor::from_array(input_ids)?,
     ])?;

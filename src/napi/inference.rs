@@ -68,8 +68,14 @@ fn path_option(path: Option<String>) -> Option<PathBuf> {
 }
 
 fn merge_options(input: NapiInferenceOptions) -> Result<SessionOptions, InferenceError> {
-    let mut options = current_core_inference_options()?;
+    let options = current_core_inference_options()?;
+    merge_options_from(options, input)
+}
 
+fn merge_options_from(
+    mut options: SessionOptions,
+    input: NapiInferenceOptions,
+) -> Result<SessionOptions, InferenceError> {
     if let Some(backend) = input.backend {
         options.backend = backend
             .parse::<Backend>()
@@ -186,4 +192,94 @@ pub fn probe_inference_backends() -> Vec<NapiBackendCapabilities> {
         .into_iter()
         .map(capabilities_from)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::{Backend, Precision};
+
+    fn empty_options() -> NapiInferenceOptions {
+        NapiInferenceOptions {
+            backend: None,
+            precision: None,
+            device_id: None,
+            openvino_device_type: None,
+            vitis_config_file: None,
+            ep_cache_dir: None,
+            migraphx_int8_calibration_table: None,
+            migraphx_exhaustive_tune: None,
+        }
+    }
+
+    #[test]
+    fn merge_options_parses_valid_backend_and_precision() {
+        let mut input = empty_options();
+        input.backend = Some("amd-gpu".to_owned());
+        input.precision = Some("fp16".to_owned());
+
+        let options = merge_options_from(SessionOptions::default(), input).unwrap();
+
+        assert_eq!(options.backend, Backend::AmdGpu);
+        assert_eq!(options.precision, Precision::Fp16);
+    }
+
+    #[test]
+    fn merge_options_rejects_invalid_backend_and_precision() {
+        let mut invalid_backend = empty_options();
+        invalid_backend.backend = Some("not-a-backend".to_owned());
+        assert!(matches!(
+            merge_options_from(SessionOptions::default(), invalid_backend),
+            Err(InferenceError::InvalidInput(message)) if message.contains("unsupported backend")
+        ));
+
+        let mut invalid_precision = empty_options();
+        invalid_precision.precision = Some("fp64".to_owned());
+        assert!(matches!(
+            merge_options_from(SessionOptions::default(), invalid_precision),
+            Err(InferenceError::InvalidInput(message)) if message.contains("unsupported precision")
+        ));
+    }
+
+    #[test]
+    fn merge_options_rejects_negative_device_id() {
+        let mut input = empty_options();
+        input.device_id = Some(-1);
+
+        assert!(matches!(
+            merge_options_from(SessionOptions::default(), input),
+            Err(InferenceError::InvalidInput(message)) if message.contains("non-negative")
+        ));
+    }
+
+    #[test]
+    fn merge_options_preserves_omitted_fields() {
+        let base = SessionOptions::for_backend(Backend::OpenVino)
+            .with_precision(Precision::Fp32)
+            .with_device_id(4)
+            .with_openvino_device_type("GPU")
+            .with_vitis_config_file("/opt/vitis/config.json")
+            .with_ep_cache_dir("/var/cache/ep")
+            .with_migraphx_int8_calibration_table("/opt/models/calibration.table")
+            .with_migraphx_exhaustive_tune(true);
+        let mut input = empty_options();
+        input.backend = Some("cpu".to_owned());
+
+        let options = merge_options_from(base.clone(), input).unwrap();
+
+        assert_eq!(options.backend, Backend::Cpu);
+        assert_eq!(options.precision, base.precision);
+        assert_eq!(options.device_id, base.device_id);
+        assert_eq!(options.openvino_device_type, base.openvino_device_type);
+        assert_eq!(options.vitis_config_file, base.vitis_config_file);
+        assert_eq!(options.ep_cache_dir, base.ep_cache_dir);
+        assert_eq!(
+            options.migraphx_int8_calibration_table,
+            base.migraphx_int8_calibration_table
+        );
+        assert_eq!(
+            options.migraphx_exhaustive_tune,
+            base.migraphx_exhaustive_tune
+        );
+    }
 }
