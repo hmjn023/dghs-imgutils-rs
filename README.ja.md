@@ -168,6 +168,66 @@ npm run build
 npm run build  # --dts フラグを含む
 ```
 
+### NVIDIA CUDA
+
+Cargo設定では、OpenVINOとCUDAのExecution Providerを同時に有効化しています。プロセス起動時に `ort` が `ORT_DYLIB_PATH` から一つのONNX Runtime共有ライブラリをロードするため、使用するハードウェアに対応したランタイムを指定してください。
+
+NVIDIA GPUでは、CUDA対応のONNX Runtime共有ライブラリを指定します。Intel向けの `onnxruntime-openvino` 配布物にはCUDA Execution Providerは含まれません。
+
+```bash
+# CUDA対応ONNX Runtimeの配置先を指定
+export ORT_DYLIB_PATH="/opt/onnxruntime-cuda/lib/libonnxruntime.so"
+export LD_LIBRARY_PATH="/opt/onnxruntime-cuda/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+
+# ロードしたランタイムにCUDA EPがあれば自動検出される
+npm run build
+```
+
+同じディレクトリに `libonnxruntime_providers_cuda.so` が必要です。また、対応するCUDAとcuDNNをインストールしてください。ONNX Runtimeは `--use_cuda` オプションでソースビルドできます。コアライブラリとExecution Providerを別の配布物から混在させないでください。[CUDA Execution Provider公式ドキュメント](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)
+
+### Intel NPU / GPU（XPU、Linux）
+
+以下のOpenVINOセットアップはLinux向けです。Windowsでは `onnxruntime.dll` を使用し、対応するOpenVINOランタイムDLLを別途インストールして、そのディレクトリをアプリケーション起動前に `PATH` へ追加してください。
+
+このリポジトリは `ort` の動的ロードと OpenVINO Execution Provider を使います。Python APIを使うのではなく、公式 `onnxruntime-openvino` パッケージに含まれるネイティブ共有ライブラリだけをRust/Node.jsからロードします。
+
+まず、OpenVINO対応のONNX Runtime一式をプロジェクト内に展開します。
+
+```bash
+uv pip install --target .ort-runtime \
+  --python-version 3.13 --only-binary=:all: --no-deps \
+  onnxruntime-openvino==1.24.1
+
+export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
+```
+
+実行時にデバイスを選択します。`NPU` は Intel NPU、`GPU` は Intel XPU（GPU）です。
+
+```bash
+# Intel NPU
+export DGHS_ORT_DEVICE=NPU
+
+# Intel XPU/GPU。LinuxではIntel OpenCL ICDを明示する
+export DGHS_ORT_DEVICE=GPU
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
+```
+
+未設定時は `AUTO:NPU,GPU,CPU` で、NPU → GPU → CPUの順に選択します。アプリケーションを起動するプロセスに `ORT_DYLIB_PATH` と上記の環境変数を設定してください。GPUを使うLinux環境では、Intel GPUドライバーと `/etc/OpenCL/vendors/` 内のICDファイルが必要です。
+
+```bash
+# ネイティブアドオンをビルド
+npm run build
+```
+
+動作確認用の最小モデルでRust側のセッション作成を確認できます。
+
+```bash
+cargo run --no-default-features --example intel_ep_probe -- \
+  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+```
+
+`onnxruntime-openvino` の共有ライブラリは、[ONNX Runtime OpenVINO Execution Provider](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html) の公式配布物です。別のOpenVINO共有ライブラリを混在させず、同じ `capi` ディレクトリのファイル一式を使ってください。
+
 ## ドキュメント
 
 ```bash

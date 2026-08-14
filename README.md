@@ -168,19 +168,69 @@ npm run build
 npm run build  # includes --dts flag
 ```
 
-### GPU (CUDA) support
+### ONNX Runtime loading
 
-By default the `ort` crate downloads a prebuilt ONNX Runtime static library. To use a system ONNX Runtime with a working CUDA execution provider, build with dynamic linking:
+The `ort` configuration in this project uses dynamic loading, so it does not download or statically link a bundled ONNX Runtime. `ORT_DYLIB_PATH` must point to a compatible `libonnxruntime.so`; the execution-provider shared libraries must be available beside it. See the Intel OpenVINO section below for the tested distribution.
+
+The Cargo configuration keeps the CUDA Execution Provider enabled alongside OpenVINO. At process startup, `ort` loads exactly one ONNX Runtime shared library from `ORT_DYLIB_PATH`; choose a runtime distribution that contains the provider you want to use.
+
+### NVIDIA CUDA support
+
+Use a CUDA-enabled ONNX Runtime distribution when running on an NVIDIA GPU. The OpenVINO distribution in the Intel section does not contain the CUDA Execution Provider.
 
 ```bash
-ORT_PREFER_DYNAMIC_LINK=1 ORT_LIB_PATH=/usr/lib npm run build
+# Point to a CUDA-enabled ONNX Runtime distribution.
+export ORT_DYLIB_PATH="/opt/onnxruntime-cuda/lib/libonnxruntime.so"
+export LD_LIBRARY_PATH="/opt/onnxruntime-cuda/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+
+# The provider is detected automatically when the loaded runtime contains it.
+npm run build
 ```
 
-Requirements:
-- `libonnxruntime.so.1` and `libonnxruntime_providers_cuda.so` must be available (e.g. in `/usr/lib` or via `LD_LIBRARY_PATH`).
-- NVIDIA drivers and the matching CUDA runtime must be installed.
+The same directory must provide `libonnxruntime_providers_cuda.so`, and compatible CUDA and cuDNN runtimes must be installed. The ONNX Runtime source build supports the `--use_cuda` option; do not mix the core library and provider libraries from different distributions. See the [CUDA Execution Provider documentation](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
 
-For CPU-only inference, build normally without these environment variables.
+### Intel NPU / GPU (XPU) support (Linux)
+
+The OpenVINO setup below is Linux-specific. On Windows, use `onnxruntime.dll`, install the matching OpenVINO runtime DLLs separately, and add their directory to `PATH` before starting the application.
+
+This project uses the `ort` dynamic loader with the OpenVINO Execution Provider. It does not call a Python API; the native shared libraries included in the official `onnxruntime-openvino` package are loaded directly by Rust/Node.js.
+
+Extract the OpenVINO-enabled ONNX Runtime distribution into the project:
+
+```bash
+uv pip install --target .ort-runtime \
+  --python-version 3.13 --only-binary=:all: --no-deps \
+  onnxruntime-openvino==1.24.1
+
+export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
+```
+
+Select the device when starting the application. `NPU` selects the Intel NPU and `GPU` selects the Intel XPU/GPU.
+
+```bash
+# Intel NPU
+export DGHS_ORT_DEVICE=NPU
+
+# Intel XPU/GPU. Select the Intel OpenCL ICD on Linux.
+export DGHS_ORT_DEVICE=GPU
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
+```
+
+When unset, the library uses `AUTO:NPU,GPU,CPU` and tries NPU, then GPU, then CPU. Set `ORT_DYLIB_PATH` and the device variables in the process that runs the application. GPU execution on Linux requires the Intel GPU driver and the ICD files in `/etc/OpenCL/vendors/`.
+
+```bash
+# Build the native addon
+npm run build
+```
+
+Use the included minimal probe to verify session creation:
+
+```bash
+cargo run --no-default-features --example intel_ep_probe -- \
+  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+```
+
+The `onnxruntime-openvino` shared libraries come from the [official ONNX Runtime OpenVINO Execution Provider distribution](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html). Keep the files from the same `capi` directory together and do not mix them with a different OpenVINO installation.
 
 ## Documentation
 
