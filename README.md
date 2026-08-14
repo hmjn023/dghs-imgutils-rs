@@ -172,7 +172,22 @@ npm run build  # includes --dts flag
 
 The `ort` configuration in this project uses dynamic loading, so it does not download or statically link a bundled ONNX Runtime. `ORT_DYLIB_PATH` must point to a compatible `libonnxruntime.so`; the execution-provider shared libraries must be available beside it. See the Intel OpenVINO section below for the tested distribution.
 
-For CUDA or TensorRT, use an ONNX Runtime build that contains the matching provider libraries and set `ORT_DYLIB_PATH` to that runtime before starting the application.
+The Cargo configuration keeps the CUDA Execution Provider enabled alongside OpenVINO. At process startup, `ort` loads exactly one ONNX Runtime shared library from `ORT_DYLIB_PATH`; choose a runtime distribution that contains the provider you want to use.
+
+### NVIDIA CUDA support
+
+Use a CUDA-enabled ONNX Runtime distribution when running on an NVIDIA GPU. The OpenVINO distribution in the Intel section does not contain the CUDA Execution Provider.
+
+```bash
+# Point to a CUDA-enabled ONNX Runtime distribution.
+export ORT_DYLIB_PATH="/opt/onnxruntime-cuda/lib/libonnxruntime.so"
+export LD_LIBRARY_PATH="/opt/onnxruntime-cuda/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+
+# The provider is detected automatically when the loaded runtime contains it.
+npm run build
+```
+
+The same directory must provide `libonnxruntime_providers_cuda.so`, and compatible CUDA and cuDNN runtimes must be installed. The ONNX Runtime source build supports the `--use_cuda` option; do not mix the core library and provider libraries from different distributions. See the [CUDA Execution Provider documentation](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
 
 ### Intel NPU / GPU (XPU) support
 

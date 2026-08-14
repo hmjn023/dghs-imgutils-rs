@@ -168,6 +168,23 @@ npm run build
 npm run build  # --dts フラグを含む
 ```
 
+### NVIDIA CUDA
+
+Cargo設定では、OpenVINOとCUDAのExecution Providerを同時に有効化しています。プロセス起動時に `ort` が `ORT_DYLIB_PATH` から一つのONNX Runtime共有ライブラリをロードするため、使用するハードウェアに対応したランタイムを指定してください。
+
+NVIDIA GPUでは、CUDA対応のONNX Runtime共有ライブラリを指定します。Intel向けの `onnxruntime-openvino` 配布物にはCUDA Execution Providerは含まれません。
+
+```bash
+# CUDA対応ONNX Runtimeの配置先を指定
+export ORT_DYLIB_PATH="/opt/onnxruntime-cuda/lib/libonnxruntime.so"
+export LD_LIBRARY_PATH="/opt/onnxruntime-cuda/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+
+# ロードしたランタイムにCUDA EPがあれば自動検出される
+npm run build
+```
+
+同じディレクトリに `libonnxruntime_providers_cuda.so` が必要です。また、対応するCUDAとcuDNNをインストールしてください。ONNX Runtimeは `--use_cuda` オプションでソースビルドできます。コアライブラリとExecution Providerを別の配布物から混在させないでください。[CUDA Execution Provider公式ドキュメント](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)
+
 ### Intel NPU / GPU（XPU）
 
 このリポジトリは `ort` の動的ロードと OpenVINO Execution Provider を使います。Python APIを使うのではなく、公式 `onnxruntime-openvino` パッケージに含まれるネイティブ共有ライブラリだけをRust/Node.jsからロードします。
