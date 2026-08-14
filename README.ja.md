@@ -185,7 +185,9 @@ npm run build
 
 同じディレクトリに `libonnxruntime_providers_cuda.so` が必要です。また、対応するCUDAとcuDNNをインストールしてください。ONNX Runtimeは `--use_cuda` オプションでソースビルドできます。コアライブラリとExecution Providerを別の配布物から混在させないでください。[CUDA Execution Provider公式ドキュメント](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)
 
-### Intel NPU / GPU（XPU）
+### Intel NPU / GPU（XPU、Linux）
+
+以下のOpenVINOセットアップはLinux向けです。Windowsでは `onnxruntime.dll` を使用し、対応するOpenVINOランタイムDLLを別途インストールして、そのディレクトリをアプリケーション起動前に `PATH` へ追加してください。
 
 このリポジトリは `ort` の動的ロードと OpenVINO Execution Provider を使います。Python APIを使うのではなく、公式 `onnxruntime-openvino` パッケージに含まれるネイティブ共有ライブラリだけをRust/Node.jsからロードします。
 
@@ -207,10 +209,10 @@ export DGHS_ORT_DEVICE=NPU
 
 # Intel XPU/GPU。LinuxではIntel OpenCL ICDを明示する
 export DGHS_ORT_DEVICE=GPU
-export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
 ```
 
-未設定時は `AUTO:NPU,GPU,CPU` で、NPU → GPU → CPUの順に選択します。アプリケーションを起動するプロセスに `ORT_DYLIB_PATH` と上記の環境変数を設定してください。GPUを使うLinux環境では、Intel GPUドライバーと `/etc/OpenCL/vendors/intel.icd` が必要です。
+未設定時は `AUTO:NPU,GPU,CPU` で、NPU → GPU → CPUの順に選択します。アプリケーションを起動するプロセスに `ORT_DYLIB_PATH` と上記の環境変数を設定してください。GPUを使うLinux環境では、Intel GPUドライバーと `/etc/OpenCL/vendors/` 内のICDファイルが必要です。
 
 ```bash
 # ネイティブアドオンをビルド

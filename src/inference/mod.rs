@@ -21,6 +21,36 @@ use tracing::{info, warn};
 const OPENVINO_DEVICE_ENV: &str = "DGHS_ORT_DEVICE";
 const DEFAULT_OPENVINO_DEVICE: &str = "AUTO:NPU,GPU,CPU";
 
+/// Returns the effective OpenVINO device policy for the current process.
+///
+/// Empty values are treated the same as an unset `DGHS_ORT_DEVICE`.
+pub fn openvino_device_type() -> String {
+    env::var(OPENVINO_DEVICE_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_OPENVINO_DEVICE.to_owned())
+}
+
+fn is_explicit_openvino_device(device_type: &str) -> bool {
+    matches!(
+        device_type.trim().to_ascii_uppercase().as_str(),
+        "CPU" | "GPU" | "NPU"
+    )
+}
+
+fn provider_registration_error<E: std::fmt::Display>(
+    error: E,
+    explicit_device: bool,
+) -> Result<(), InferenceError> {
+    if explicit_device {
+        Err(InferenceError::Initialization(format!(
+            "Failed to register execution providers: {error}"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 /// ONNX セッションのキャッシュ。
 /// モデルファイルパスをキーとして、作成済みセッションを共有する。
 /// `Session::run` が `&mut self` を必要とするため、`Mutex` で保護する。
@@ -52,6 +82,40 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
         Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
 
     let mut providers = Vec::new();
+
+    let device_type = openvino_device_type();
+    let explicit_openvino_device = is_explicit_openvino_device(&device_type);
+
+    // Register an explicitly requested OpenVINO device first so that it has
+    // priority over other available execution providers.
+    let openvino = OpenVINO::default().with_device_type(&device_type);
+    let mut openvino_provider = match openvino.is_available() {
+        Ok(true) => {
+            info!("[ort] OpenVINO EP is available! Enabling device type {device_type}.");
+            Some(openvino.build().error_on_failure())
+        }
+        Ok(false) if explicit_openvino_device => {
+            return Err(InferenceError::Initialization(format!(
+                "OpenVINO EP is unavailable for requested device {device_type}"
+            )));
+        }
+        Ok(false) => None,
+        Err(e) if explicit_openvino_device => {
+            return Err(InferenceError::Initialization(format!(
+                "OpenVINO EP availability check failed for requested device {device_type}: {e}"
+            )));
+        }
+        Err(e) => {
+            warn!("[ort] OpenVINO EP check error: {:?}", e);
+            None
+        }
+    };
+
+    if explicit_openvino_device {
+        if let Some(provider) = openvino_provider.take() {
+            providers.push(provider);
+        }
+    }
 
     // 1. TensorRT (NVIDIA 高性能 GPU)
     let trt = TensorRT::default();
@@ -94,20 +158,11 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
         }
     }
 
-    // 4. OpenVINO (Intel CPU/GPU/NPU)
-    let device_type = env::var(OPENVINO_DEVICE_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_OPENVINO_DEVICE.to_owned());
-    let openvino = OpenVINO::default().with_device_type(&device_type);
-    match openvino.is_available() {
-        Ok(true) => {
-            info!("[ort] OpenVINO EP is available! Enabling device type {device_type}.");
-            providers.push(openvino.build().error_on_failure());
-        }
-        Ok(false) => {}
-        Err(e) => {
-            warn!("[ort] OpenVINO EP check error: {:?}", e);
+    // 4. OpenVINO (Intel CPU/GPU/NPU), after the existing providers for the
+    // automatic policy. Explicit CPU/GPU/NPU requests were added above.
+    if !explicit_openvino_device {
+        if let Some(provider) = openvino_provider {
+            providers.push(provider);
         }
     }
 
@@ -115,6 +170,9 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
         match builder.clone().with_execution_providers(providers) {
             Ok(b) => builder = b,
             Err(e) => {
+                if let Err(error) = provider_registration_error(&e, explicit_openvino_device) {
+                    return Err(error);
+                }
                 warn!(
                     "[ort] Failed to register execution providers, falling back to CPU: {:?}",
                     e
@@ -184,9 +242,84 @@ pub fn run_onnx_session<'s>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
+    use std::ffi::OsString;
+    use std::sync::Mutex;
+
+    static DEVICE_ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct DeviceEnvGuard {
+        previous: Option<OsString>,
+    }
+
+    impl DeviceEnvGuard {
+        fn set(value: Option<&str>) -> Self {
+            let previous = env::var_os(OPENVINO_DEVICE_ENV);
+            unsafe {
+                match value {
+                    Some(value) => env::set_var(OPENVINO_DEVICE_ENV, value),
+                    None => env::remove_var(OPENVINO_DEVICE_ENV),
+                }
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for DeviceEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => env::set_var(OPENVINO_DEVICE_ENV, value),
+                    None => env::remove_var(OPENVINO_DEVICE_ENV),
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_init_onnx_runtime() {
         assert!(init_onnx_runtime().is_ok());
+    }
+
+    #[test]
+    fn test_openvino_device_defaults_when_unset() {
+        let _lock = DEVICE_ENV_LOCK.lock().unwrap();
+        let _env = DeviceEnvGuard::set(None);
+
+        assert_eq!(openvino_device_type(), DEFAULT_OPENVINO_DEVICE);
+        assert!(!is_explicit_openvino_device(&openvino_device_type()));
+    }
+
+    #[test]
+    fn test_openvino_device_defaults_when_blank() {
+        let _lock = DEVICE_ENV_LOCK.lock().unwrap();
+        let _env = DeviceEnvGuard::set(Some("  "));
+
+        assert_eq!(openvino_device_type(), DEFAULT_OPENVINO_DEVICE);
+        assert!(!is_explicit_openvino_device(&openvino_device_type()));
+    }
+
+    #[test]
+    fn test_openvino_device_accepts_explicit_npu() {
+        let _lock = DEVICE_ENV_LOCK.lock().unwrap();
+        let _env = DeviceEnvGuard::set(Some("NPU"));
+
+        assert_eq!(openvino_device_type(), "NPU");
+        assert!(is_explicit_openvino_device(&openvino_device_type()));
+    }
+
+    #[test]
+    fn test_explicit_provider_registration_failure_is_propagated() {
+        let error = provider_registration_error("provider unavailable", true).unwrap_err();
+
+        assert!(matches!(
+            error,
+            InferenceError::Initialization(message) if message.contains("provider unavailable")
+        ));
+    }
+
+    #[test]
+    fn test_automatic_provider_registration_failure_allows_cpu_fallback() {
+        assert!(provider_registration_error("provider unavailable", false).is_ok());
     }
 }

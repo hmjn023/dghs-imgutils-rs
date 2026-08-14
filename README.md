@@ -189,7 +189,9 @@ npm run build
 
 The same directory must provide `libonnxruntime_providers_cuda.so`, and compatible CUDA and cuDNN runtimes must be installed. The ONNX Runtime source build supports the `--use_cuda` option; do not mix the core library and provider libraries from different distributions. See the [CUDA Execution Provider documentation](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
 
-### Intel NPU / GPU (XPU) support
+### Intel NPU / GPU (XPU) support (Linux)
+
+The OpenVINO setup below is Linux-specific. On Windows, use `onnxruntime.dll`, install the matching OpenVINO runtime DLLs separately, and add their directory to `PATH` before starting the application.
 
 This project uses the `ort` dynamic loader with the OpenVINO Execution Provider. It does not call a Python API; the native shared libraries included in the official `onnxruntime-openvino` package are loaded directly by Rust/Node.js.
 
@@ -211,10 +213,10 @@ export DGHS_ORT_DEVICE=NPU
 
 # Intel XPU/GPU. Select the Intel OpenCL ICD on Linux.
 export DGHS_ORT_DEVICE=GPU
-export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
 ```
 
-When unset, the library uses `AUTO:NPU,GPU,CPU` and tries NPU, then GPU, then CPU. Set `ORT_DYLIB_PATH` and the device variables in the process that runs the application. GPU execution on Linux requires the Intel GPU driver and `/etc/OpenCL/vendors/intel.icd`.
+When unset, the library uses `AUTO:NPU,GPU,CPU` and tries NPU, then GPU, then CPU. Set `ORT_DYLIB_PATH` and the device variables in the process that runs the application. GPU execution on Linux requires the Intel GPU driver and the ICD files in `/etc/OpenCL/vendors/`.
 
 ```bash
 # Build the native addon
