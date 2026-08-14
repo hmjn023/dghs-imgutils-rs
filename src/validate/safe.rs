@@ -9,11 +9,10 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -23,7 +22,7 @@ const SAFE_SIZE: u32 = 384;
 const SAFE_LABELS: &[&str] = &["polluted", "safe"];
 
 struct SafeModel {
-    session: Session,
+    session: SharedSession,
 }
 
 static SAFE_CACHE: Lazy<Mutex<Option<SafeModel>>> = Lazy::new(|| Mutex::new(None));
@@ -37,7 +36,7 @@ fn ensure_safe_model(model_name: &str) -> Result<(), InferenceError> {
     let filename = format!("{}.onnx", model_name);
     let model_path = hf_hub_download(SAFE_REPO, &filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     *cache = Some(SafeModel { session });
     Ok(())
@@ -76,8 +75,8 @@ pub fn safe_check_score(
     let mut cache = SAFE_CACHE.lock().unwrap();
     let entry = cache.as_mut().unwrap();
 
-    let outputs = entry
-        .session
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session
         .run(ort::inputs!["input" => ort::value::Tensor::from_array(tensor)?])
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
 

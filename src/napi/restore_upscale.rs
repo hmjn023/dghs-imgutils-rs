@@ -1,10 +1,15 @@
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use napi_derive::napi;
 
 /// NafNet モデルで画像を復元します。
 ///
 /// `model` には `"REDS"`, `"GoPro"`, `"SIDD"` のいずれかを指定します。
 #[napi]
-pub fn restore_with_nafnet(path: String, model: Option<String>) -> napi::Result<Vec<u8>> {
+pub fn restore_with_nafnet(
+    path: String,
+    model: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -12,11 +17,13 @@ pub fn restore_with_nafnet(path: String, model: Option<String>) -> napi::Result<
         )
     })?;
     let model = model.as_deref().unwrap_or("REDS");
-    let result = crate::restore::nafnet::restore_with_nafnet(&image, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("NafNet restoration failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        crate::restore::nafnet::restore_with_nafnet(&image, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("NafNet restoration failed: {}", e),
+            )
+        })
     })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     result
@@ -34,7 +41,11 @@ pub fn restore_with_nafnet(path: String, model: Option<String>) -> napi::Result<
 ///
 /// `model` には `"GAN"` または `"PSNR"` を指定します。
 #[napi]
-pub fn restore_with_scunet(path: String, model: Option<String>) -> napi::Result<Vec<u8>> {
+pub fn restore_with_scunet(
+    path: String,
+    model: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -42,11 +53,13 @@ pub fn restore_with_scunet(path: String, model: Option<String>) -> napi::Result<
         )
     })?;
     let model = model.as_deref().unwrap_or("GAN");
-    let result = crate::restore::scunet::restore_with_scunet(&image, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("SCUNet restoration failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        crate::restore::scunet::restore_with_scunet(&image, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("SCUNet restoration failed: {}", e),
+            )
+        })
     })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     result
@@ -102,6 +115,7 @@ pub fn upscale_with_cdc(
     tile_size: Option<u32>,
     tile_overlap: Option<u32>,
     batch_size: Option<u32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -113,14 +127,15 @@ pub fn upscale_with_cdc(
     let tile_size = tile_size.unwrap_or(512);
     let tile_overlap = tile_overlap.unwrap_or(64);
     let batch_size = batch_size.unwrap_or(1);
-    let result =
+    let result = run_with_inference_options(inference_options, || {
         crate::upscale::cdc::upscale_with_cdc(&image, &model, tile_size, tile_overlap, batch_size)
             .map_err(|e| {
                 napi::Error::new(
                     napi::Status::GenericFailure,
                     format!("CDC upscale failed: {}", e),
                 )
-            })?;
+            })
+    })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     result
         .write_to(&mut buf, image::ImageFormat::Png)

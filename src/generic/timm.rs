@@ -4,17 +4,16 @@ use std::sync::Mutex;
 use image::DynamicImage;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 use serde::Deserialize;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 
 /// A cached TIMM model entry shared between classify and multilabel variants.
 struct TIMMEntry {
-    session: Session,
+    session: SharedSession,
     labels: Vec<String>,
     preprocess: PreprocessConfig,
 }
@@ -62,7 +61,7 @@ fn ensure_timm_model(repo_id: &str) -> Result<(), GenericError> {
         }
     }
 
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     // Try to load preprocess.json
     let preprocess = match hf_hub_download(repo_id, "preprocess.json", None, None) {
@@ -170,7 +169,8 @@ pub fn classify_timm_predict(
 
     let tensor = apply_preprocess(image, &entry.preprocess.test)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session.run(ort::inputs![
         "input" => ort::value::Tensor::from_array(tensor)?
     ])?;
 
@@ -225,7 +225,8 @@ pub fn multilabel_timm_predict(
 
     let tensor = apply_preprocess(image, &entry.preprocess.test)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session.run(ort::inputs![
         "input" => ort::value::Tensor::from_array(tensor)?
     ])?;
 

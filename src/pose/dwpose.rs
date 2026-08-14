@@ -1,29 +1,18 @@
-use std::sync::Mutex;
-
 use image::{DynamicImage, GenericImageView, Rgb};
 use ndarray::{Array4, IxDyn};
-use once_cell::sync::Lazy;
 
 use crate::detect::person::detect_person;
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 
 use super::PoseError;
 use super::format::{OP18KeyPoint, OP18KeyPointSet};
 
-static DWPOSE_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
-
-fn ensure_model() -> Result<(), InferenceError> {
-    let mut lock = DWPOSE_SESSION
-        .lock()
+fn ensure_model() -> Result<SharedSession, InferenceError> {
+    let path = hf_hub_download("yzd-v/DWPose", "dw-ll_ucoco_384.onnx", None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    if lock.is_none() {
-        let path = hf_hub_download("yzd-v/DWPose", "dw-ll_ucoco_384.onnx", None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-        *lock = Some(create_onnx_session(path)?);
-    }
-    Ok(())
+    get_or_create_session(path)
 }
 
 fn rot_rad(angle_deg: f32) -> f32 {
@@ -467,8 +456,6 @@ pub fn dwpose_estimate(
     out_bboxes: Option<Vec<[f32; 4]>>,
     person_detect_cfgs: Option<serde_json::Value>,
 ) -> Result<Vec<OP18KeyPointSet>, PoseError> {
-    ensure_model()?;
-
     let rgb = force_image_background(image, [255, 255, 255]);
 
     let bboxes: Vec<[f32; 4]> = if let Some(bboxes) = out_bboxes {
@@ -523,10 +510,9 @@ pub fn dwpose_estimate(
 
     let (tensors, centers, scales) = preprocess_dwpose(&rgb, &bboxes, model_input_size);
 
-    let mut lock = DWPOSE_SESSION
-        .lock()
+    let session = ensure_model()?;
+    let mut session = lock_session(&session)
         .map_err(|e| PoseError::Inference(InferenceError::Initialization(e.to_string())))?;
-    let session = lock.as_mut().unwrap();
 
     let mut all_outputs = Vec::new();
     for tensor in &tensors {

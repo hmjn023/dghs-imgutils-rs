@@ -3,14 +3,15 @@ use std::sync::Mutex;
 
 use image::DynamicImage;
 use image::imageops::FilterType;
-use ndarray::{Array2, Array4};
+use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{create_onnx_session, yolo_nms, yolo_xywh2xyxy};
+use crate::inference::{
+    SharedSession, get_or_create_session, lock_session, yolo_nms, yolo_xywh2xyxy,
+};
 
 /// A segmentation detection result.
 #[derive(Debug, Clone)]
@@ -26,7 +27,7 @@ pub struct SegDetection {
 }
 
 struct YOLOSegEntry {
-    session: Session,
+    session: SharedSession,
     max_infer_size: u32,
     labels: Vec<String>,
 }
@@ -45,11 +46,12 @@ fn ensure_yoloseg_model(repo_id: &str, model_name: &str) -> Result<(), GenericEr
 
     let model_path = hf_hub_download(repo_id, &format!("{}/model.onnx", model_name), None, None)?;
 
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     // Extract metadata from the model (in a block to drop the borrow on session)
     let (max_infer_size, labels) = {
-        let metadata = session.metadata()?;
+        let session_guard = lock_session(&session)?;
+        let metadata = session_guard.metadata()?;
         let imgsz_str = metadata
             .custom("imgsz")
             .unwrap_or_else(|| "640".to_string());
@@ -169,7 +171,8 @@ pub fn yolo_seg_predict(
 
     let (input_tensor, old_size, new_size) = preprocess_yoloseg(image, entry.max_infer_size)?;
 
-    let outputs = entry.session.run(ort::inputs![
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session.run(ort::inputs![
         "images" => ort::value::Tensor::from_array(input_tensor)?
     ])?;
 

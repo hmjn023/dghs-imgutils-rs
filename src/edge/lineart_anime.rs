@@ -11,20 +11,11 @@ use crate::edge::canny::EdgeError;
 use crate::edge::lineart::{blend_edge_mask, resize_image_align};
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::{SharedSession, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use ndarray::Array4;
-use once_cell::sync::Lazy;
-use ort::session::Session;
-use std::sync::Mutex;
-
-static LINEART_ANIME_SESSION: Lazy<Mutex<Option<Session>>> = Lazy::new(|| Mutex::new(None));
-
-fn load_lineart_anime_session() -> Result<(), EdgeError> {
-    if LINEART_ANIME_SESSION.lock().unwrap().is_some() {
-        return Ok(());
-    }
+fn load_lineart_anime_session() -> Result<SharedSession, EdgeError> {
     let model_path = hf_hub_download(
         "deepghs/imgutils-models",
         "lineart/lineart_anime.onnx",
@@ -32,10 +23,7 @@ fn load_lineart_anime_session() -> Result<(), EdgeError> {
         None,
     )
     .map_err(|e| EdgeError::Processing(e.to_string()))?;
-    let session =
-        create_onnx_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
-    *LINEART_ANIME_SESSION.lock().unwrap() = Some(session);
-    Ok(())
+    get_or_create_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))
 }
 
 /// LineartAnime モデルによるエッジマスク（float32 [H, W]）を返します。
@@ -57,9 +45,8 @@ pub fn get_edge_by_lineart_anime(
     // [-1, 1] 正規化: (x / 127.5) - 1.0
     let tensor = image_to_tensor_minus1_1(&resized, rw, rh);
 
-    load_lineart_anime_session()?;
-    let mut guard = LINEART_ANIME_SESSION.lock().unwrap();
-    let session = guard.as_mut().unwrap();
+    let session = load_lineart_anime_session()?;
+    let mut session = lock_session(&session).map_err(|e| EdgeError::Processing(e.to_string()))?;
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
         .map_err(|e| EdgeError::Processing(e.to_string()))?;

@@ -3,15 +3,9 @@
 
 use crate::detect::base::Detection;
 use crate::hub::hf_hub_download;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use image::{DynamicImage, GrayImage, ImageBuffer, Luma};
 use ndarray::{Array2, Array4};
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::Mutex;
-
-static TEXT_SESSION_CACHE: Lazy<Mutex<HashMap<String, ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// テキスト検出用のヒートマップ正規化
 fn normalize_text_input(
@@ -96,17 +90,11 @@ pub fn detect_text(
     let input_tensor = normalize_text_input(&resized_image, padded_w, padded_h, orig_w, orig_h);
 
     // 4. ONNX 推論の実行
-    let mut cache = TEXT_SESSION_CACHE
-        .lock()
+    let model_filename = format!("{}/end2end.onnx", model);
+    let path = hf_hub_download("deepghs/text_detection", &model_filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    if !cache.contains_key(model) {
-        let model_filename = format!("{}/end2end.onnx", model);
-        let path = hf_hub_download("deepghs/text_detection", &model_filename, None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-        let session = create_onnx_session(path)?;
-        cache.insert(model.to_string(), session);
-    }
-    let session = cache.get_mut(model).unwrap();
+    let session = get_or_create_session(path)?;
+    let mut session = lock_session(&session)?;
 
     let inputs = ort::inputs!["input" => ort::value::Tensor::from_array(input_tensor)?];
     let outputs = session.run(inputs)?;

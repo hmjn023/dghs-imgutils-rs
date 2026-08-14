@@ -1,5 +1,6 @@
 //! 領域分割 (segment) モジュールの napi-rs バインディング。
 
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::segment::isnetis::get_isnetis_mask as core_get_isnetis_mask;
 use crate::segment::isnetis::segment_rgba_with_isnetis as core_segment_rgba_with_isnetis;
 use crate::segment::isnetis::segment_with_isnetis as core_segment_with_isnetis;
@@ -7,7 +8,11 @@ use napi_derive::napi;
 
 /// ISNetIS 前景セグメンテーション結果のマスク値を 2次元配列（f64）で返します。
 #[napi]
-pub fn get_isnetis_mask(path: String, scale: Option<i32>) -> napi::Result<Vec<Vec<f64>>> {
+pub fn get_isnetis_mask(
+    path: String,
+    scale: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<Vec<f64>>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -17,11 +22,13 @@ pub fn get_isnetis_mask(path: String, scale: Option<i32>) -> napi::Result<Vec<Ve
 
     let s = scale.unwrap_or(1024) as u32;
 
-    let mask = core_get_isnetis_mask(&image, s).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("ISNetIS mask extraction failed: {}", e),
-        )
+    let mask = run_with_inference_options(inference_options, || {
+        core_get_isnetis_mask(&image, s).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("ISNetIS mask extraction failed: {}", e),
+            )
+        })
     })?;
 
     let mut result = Vec::with_capacity(mask.nrows());
@@ -43,6 +50,7 @@ pub fn segment_with_isnetis(
     path: String,
     bg_color: Vec<i32>,
     scale: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -66,11 +74,13 @@ pub fn segment_with_isnetis(
 
     let s = scale.unwrap_or(1024) as u32;
 
-    let (_, segmented_img) = core_segment_with_isnetis(&image, bg_color_u8, s).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("ISNetIS color segmentation failed: {}", e),
-        )
+    let (_, segmented_img) = run_with_inference_options(inference_options, || {
+        core_segment_with_isnetis(&image, bg_color_u8, s).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("ISNetIS color segmentation failed: {}", e),
+            )
+        })
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());
@@ -91,7 +101,11 @@ pub fn segment_with_isnetis(
 /// * `path`: 元画像のファイルパス
 /// * `scale`: 推論時のサイズ（オプション）
 #[napi]
-pub async fn segment_rgba_with_isnetis(path: String, scale: Option<i32>) -> napi::Result<Vec<u8>> {
+pub async fn segment_rgba_with_isnetis(
+    path: String,
+    scale: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<u8>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -101,11 +115,13 @@ pub async fn segment_rgba_with_isnetis(path: String, scale: Option<i32>) -> napi
 
     let s = scale.unwrap_or(1024) as u32;
 
-    let (_, segmented_img) = core_segment_rgba_with_isnetis(&image, s).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("ISNetIS RGBA segmentation failed: {}", e),
-        )
+    let (_, segmented_img) = run_with_inference_options(inference_options, || {
+        core_segment_rgba_with_isnetis(&image, s).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("ISNetIS RGBA segmentation failed: {}", e),
+            )
+        })
     })?;
 
     let mut buf = std::io::Cursor::new(Vec::new());

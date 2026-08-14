@@ -19,6 +19,7 @@ use crate::detect::similarity::{
 };
 use crate::detect::text::detect_text as core_detect_text;
 use crate::detect::visual::detection_visualize as core_detection_visualize;
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::napi::open_image_robust;
 use napi_derive::napi;
 use ndarray::Array2;
@@ -93,6 +94,7 @@ pub fn detect_faces(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -106,11 +108,13 @@ pub fn detect_faces(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_faces(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Face detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_faces(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Face detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -124,6 +128,7 @@ pub fn detect_heads(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -137,11 +142,13 @@ pub fn detect_heads(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_heads(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Head detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_heads(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Head detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -155,6 +162,7 @@ pub async fn detect_person(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -168,11 +176,13 @@ pub async fn detect_person(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_person(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Person detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_person(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Person detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -186,6 +196,7 @@ pub fn detect_censors(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -199,11 +210,13 @@ pub fn detect_censors(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_censors(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Censor detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_censors(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Censor detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -216,6 +229,7 @@ pub fn detect_with_booru_yolo(
     model_name: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -228,11 +242,13 @@ pub fn detect_with_booru_yolo(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_with_booru_yolo(&image, &model, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Booru YOLO detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_with_booru_yolo(&image, &model, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Booru YOLO detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -245,6 +261,7 @@ pub fn detect_with_nudenet(
     topk: Option<i32>,
     iou_threshold: Option<f64>,
     score_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -257,11 +274,13 @@ pub fn detect_with_nudenet(
     let iou = iou_threshold.unwrap_or(0.45) as f32;
     let score = score_threshold.unwrap_or(0.25) as f32;
 
-    let results = core_detect_with_nudenet(&image, k, iou, score).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("NudeNet detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_with_nudenet(&image, k, iou, score).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("NudeNet detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -274,6 +293,7 @@ pub fn detect_text(
     model: Option<String>,
     threshold: Option<f64>,
     max_area_size: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -286,11 +306,13 @@ pub fn detect_text(
     let conf = threshold.unwrap_or(0.05) as f32;
     let max_size = max_area_size.map(|v| v.max(0) as u32);
 
-    let results = core_detect_text(&image, &model, conf, max_size).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Text detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_text(&image, &model, conf, max_size).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Text detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -304,6 +326,7 @@ pub fn detect_eyes(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -317,11 +340,13 @@ pub fn detect_eyes(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_eyes(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Eye detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_eyes(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Eye detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -335,6 +360,7 @@ pub fn detect_halfbody(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -348,11 +374,13 @@ pub fn detect_halfbody(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_halfbody(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Halfbody detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_halfbody(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Halfbody detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())
@@ -366,6 +394,7 @@ pub fn detect_hands(
     version: Option<String>,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<NapiDetection>> {
     let image = open_image_robust(&path).map_err(|e| {
         napi::Error::new(
@@ -379,11 +408,13 @@ pub fn detect_hands(
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
 
-    let results = core_detect_hands(&image, &level, &version, conf, iou).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Hand detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_hands(&image, &level, &version, conf, iou).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Hand detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiDetection::from).collect())

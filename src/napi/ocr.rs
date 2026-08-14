@@ -1,3 +1,4 @@
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::ocr::detect::{BBox, detect_text_with_paddleocr as core_detect_text};
 use crate::ocr::recognize::ocr as core_ocr;
 use napi_derive::napi;
@@ -56,7 +57,10 @@ impl From<(BBox, String, f32)> for NapiOcrResult {
 }
 
 #[napi]
-pub fn ocr(path: String) -> napi::Result<Vec<NapiOcrResult>> {
+pub fn ocr(
+    path: String,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<NapiOcrResult>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -64,15 +68,20 @@ pub fn ocr(path: String) -> napi::Result<Vec<NapiOcrResult>> {
         )
     })?;
 
-    let results = core_ocr(&image).map_err(|e| {
-        napi::Error::new(napi::Status::GenericFailure, format!("OCR failed: {}", e))
+    let results = run_with_inference_options(inference_options, || {
+        core_ocr(&image).map_err(|e| {
+            napi::Error::new(napi::Status::GenericFailure, format!("OCR failed: {}", e))
+        })
     })?;
 
     Ok(results.into_iter().map(NapiOcrResult::from).collect())
 }
 
 #[napi]
-pub fn detect_text_ocr(path: String) -> napi::Result<Vec<NapiBBoxResult>> {
+pub fn detect_text_ocr(
+    path: String,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<NapiBBoxResult>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -80,11 +89,13 @@ pub fn detect_text_ocr(path: String) -> napi::Result<Vec<NapiBBoxResult>> {
         )
     })?;
 
-    let results = core_detect_text(&image).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Text detection failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_detect_text(&image).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Text detection failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiBBoxResult::from).collect())

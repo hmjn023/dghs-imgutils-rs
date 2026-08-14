@@ -1,3 +1,4 @@
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use crate::pose::dwpose::dwpose_estimate as core_dwpose_estimate;
 use crate::pose::format::OP18KeyPointSet as CoreOP18KeyPointSet;
 use crate::pose::visual::op18_visualize as core_op18_visualize;
@@ -39,7 +40,10 @@ impl From<CoreOP18KeyPointSet> for NapiOP18KeyPointSet {
 ///
 /// * `path`: 画像ファイルのローカル絶対パスまたは相対パス
 #[napi]
-pub fn dwpose_estimate(path: String) -> napi::Result<Vec<NapiOP18KeyPointSet>> {
+pub fn dwpose_estimate(
+    path: String,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<NapiOP18KeyPointSet>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -47,11 +51,13 @@ pub fn dwpose_estimate(path: String) -> napi::Result<Vec<NapiOP18KeyPointSet>> {
         )
     })?;
 
-    let results = core_dwpose_estimate(&image, true, None, None).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("DWpose estimation failed: {}", e),
-        )
+    let results = run_with_inference_options(inference_options, || {
+        core_dwpose_estimate(&image, true, None, None).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("DWpose estimation failed: {}", e),
+            )
+        })
     })?;
 
     Ok(results.into_iter().map(NapiOP18KeyPointSet::from).collect())

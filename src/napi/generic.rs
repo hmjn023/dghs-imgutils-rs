@@ -2,6 +2,7 @@ use crate::generic::clip;
 use crate::generic::siglip;
 use crate::generic::timm;
 use crate::generic::yoloseg;
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use napi_derive::napi;
 use std::collections::HashMap;
 
@@ -12,6 +13,7 @@ pub fn clip_image_encode(
     path: String,
     repo_id: Option<String>,
     model_name: String,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -20,8 +22,10 @@ pub fn clip_image_encode(
         )
     })?;
     let repo = repo_id.unwrap_or_else(|| "deepghs/clip_onnx".to_string());
-    let (embeddings, _encodings) = clip::clip_image_encode(&[image], &repo, &model_name)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let (embeddings, _encodings) = run_with_inference_options(inference_options, || {
+        clip::clip_image_encode(&[image], &repo, &model_name)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(embeddings
         .into_iter()
         .map(|v| v.into_iter().map(|x| x as f64).collect())
@@ -34,10 +38,13 @@ pub fn clip_text_encode(
     texts: Vec<String>,
     repo_id: Option<String>,
     model_name: String,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let repo = repo_id.unwrap_or_else(|| "deepghs/clip_onnx".to_string());
-    let (embeddings, _encodings) = clip::clip_text_encode(&texts, &repo, &model_name)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let (embeddings, _encodings) = run_with_inference_options(inference_options, || {
+        clip::clip_text_encode(&texts, &repo, &model_name)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(embeddings
         .into_iter()
         .map(|v| v.into_iter().map(|x| x as f64).collect())
@@ -74,6 +81,7 @@ pub fn siglip_image_encode(
     path: String,
     repo_id: Option<String>,
     model_name: String,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -82,8 +90,10 @@ pub fn siglip_image_encode(
         )
     })?;
     let repo = repo_id.unwrap_or_else(|| "deepghs/siglip_onnx".to_string());
-    let (embeddings, _encodings) = siglip::siglip_image_encode(&[image], &repo, &model_name)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let (embeddings, _encodings) = run_with_inference_options(inference_options, || {
+        siglip::siglip_image_encode(&[image], &repo, &model_name)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(embeddings
         .into_iter()
         .map(|v| v.into_iter().map(|x| x as f64).collect())
@@ -138,6 +148,7 @@ pub fn yolo_segment(
     model_name: String,
     conf_threshold: Option<f64>,
     iou_threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<SegDetectionResult>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -147,8 +158,10 @@ pub fn yolo_segment(
     })?;
     let conf = conf_threshold.unwrap_or(0.25) as f32;
     let iou = iou_threshold.unwrap_or(0.7) as f32;
-    let detections = yoloseg::yolo_seg_predict(&image, &repo_id, &model_name, conf, iou)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let detections = run_with_inference_options(inference_options, || {
+        yoloseg::yolo_seg_predict(&image, &repo_id, &model_name, conf, iou)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
 
     Ok(detections
         .into_iter()
@@ -180,10 +193,13 @@ pub fn siglip_text_encode(
     texts: Vec<String>,
     repo_id: Option<String>,
     model_name: String,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let repo = repo_id.unwrap_or_else(|| "deepghs/siglip_onnx".to_string());
-    let (embeddings, _encodings) = siglip::siglip_text_encode(&texts, &repo, &model_name)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let (embeddings, _encodings) = run_with_inference_options(inference_options, || {
+        siglip::siglip_text_encode(&texts, &repo, &model_name)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(embeddings
         .into_iter()
         .map(|v| v.into_iter().map(|x| x as f64).collect())
@@ -196,6 +212,7 @@ pub fn classify_timm_predict(
     path: String,
     repo_id: String,
     topk: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<HashMap<String, f64>> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -204,8 +221,10 @@ pub fn classify_timm_predict(
         )
     })?;
     let tk = topk.map(|v| v.max(1) as usize);
-    let result = timm::classify_timm_predict(&image, &repo_id, tk)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let result = run_with_inference_options(inference_options, || {
+        timm::classify_timm_predict(&image, &repo_id, tk)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(result.into_iter().map(|(k, v)| (k, v as f64)).collect())
 }
 
@@ -221,6 +240,7 @@ pub fn multilabel_timm_predict(
     path: String,
     repo_id: String,
     thresholds: Option<HashMap<String, f64>>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<MultiLabelResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -229,8 +249,10 @@ pub fn multilabel_timm_predict(
         )
     })?;
     let th = thresholds.map(|m| m.into_iter().map(|(k, v)| (k, v as f32)).collect());
-    let result = timm::multilabel_timm_predict(&image, &repo_id, th)
-        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))?;
+    let result = run_with_inference_options(inference_options, || {
+        timm::multilabel_timm_predict(&image, &repo_id, th)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    })?;
     Ok(MultiLabelResult {
         categories: result
             .categories

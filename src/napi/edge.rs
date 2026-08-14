@@ -1,5 +1,6 @@
 //! エッジ検出 (edge) モジュールの napi-rs バインディング。
 
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use napi_derive::napi;
 
 /// Canny エッジ検出でエッジマスク（f64 の2次元配列）を返します。
@@ -51,14 +52,17 @@ pub fn get_edge_by_lineart(
     path: String,
     coarse: Option<bool>,
     detect_resolution: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let c = coarse.unwrap_or(false);
     let res = detect_resolution.unwrap_or(512) as u32;
-    let result = crate::edge::lineart::get_edge_by_lineart(&path, c, res).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Lineart edge detection failed: {}", e),
-        )
+    let result = run_with_inference_options(inference_options, || {
+        crate::edge::lineart::get_edge_by_lineart(&path, c, res).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Lineart edge detection failed: {}", e),
+            )
+        })
     })?;
     Ok(result
         .into_iter()
@@ -74,18 +78,20 @@ pub fn edge_image_with_lineart(
     detect_resolution: Option<i32>,
     backcolor: Option<Vec<i32>>,
     forecolor: Option<Vec<i32>>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let c = coarse.unwrap_or(false);
     let res = detect_resolution.unwrap_or(512) as u32;
     let bg = parse_color(backcolor, [255, 255, 255]);
     let fg = forecolor.map(|v| parse_color(Some(v), [0, 0, 0]));
-    let result =
+    let result = run_with_inference_options(inference_options, || {
         crate::edge::lineart::edge_image_with_lineart(&path, c, res, bg, fg).map_err(|e| {
             napi::Error::new(
                 napi::Status::GenericFailure,
                 format!("Lineart edge image failed: {}", e),
             )
-        })?;
+        })
+    })?;
     Ok(result)
 }
 
@@ -94,15 +100,17 @@ pub fn edge_image_with_lineart(
 pub fn get_edge_by_lineart_anime(
     path: String,
     detect_resolution: Option<i32>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let res = detect_resolution.unwrap_or(512) as u32;
-    let result =
+    let result = run_with_inference_options(inference_options, || {
         crate::edge::lineart_anime::get_edge_by_lineart_anime(&path, res).map_err(|e| {
             napi::Error::new(
                 napi::Status::GenericFailure,
                 format!("LineartAnime edge detection failed: {}", e),
             )
-        })?;
+        })
+    })?;
     Ok(result
         .into_iter()
         .map(|row| row.into_iter().map(|v| v as f64).collect())
@@ -116,17 +124,19 @@ pub fn edge_image_with_lineart_anime(
     detect_resolution: Option<i32>,
     backcolor: Option<Vec<i32>>,
     forecolor: Option<Vec<i32>>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<u8>> {
     let res = detect_resolution.unwrap_or(512) as u32;
     let bg = parse_color(backcolor, [255, 255, 255]);
     let fg = forecolor.map(|v| parse_color(Some(v), [0, 0, 0]));
-    let result = crate::edge::lineart_anime::edge_image_with_lineart_anime(&path, res, bg, fg)
-        .map_err(|e| {
+    let result = run_with_inference_options(inference_options, || {
+        crate::edge::lineart_anime::edge_image_with_lineart_anime(&path, res, bg, fg).map_err(|e| {
             napi::Error::new(
                 napi::Status::GenericFailure,
                 format!("LineartAnime edge image failed: {}", e),
             )
-        })?;
+        })
+    })?;
     Ok(result)
 }
 

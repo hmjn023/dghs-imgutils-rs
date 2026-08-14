@@ -9,11 +9,10 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -21,7 +20,7 @@ const NSFW_REPO: &str = "deepghs/imgutils-models";
 const NSFW_LABELS: &[&str] = &["drawings", "hentai", "neutral", "porn", "sexy"];
 
 struct NsfwModel {
-    session: Session,
+    session: SharedSession,
     size: u32,
 }
 
@@ -41,7 +40,7 @@ fn ensure_nsfw_model(model_name: &str) -> Result<(), InferenceError> {
 
     let model_path = hf_hub_download(NSFW_REPO, filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     NSFW_CACHE
         .lock()
@@ -79,8 +78,8 @@ pub fn nsfw_pred_score(
         tensor[[0, y as usize, x as usize, 2]] = pixel[2] as f32 / 255.0;
     }
 
-    let outputs = entry
-        .session
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session
         .run(ort::inputs!["input_1" => ort::value::Tensor::from_array(tensor.clone())?])
         .map_err(|e| InferenceError::InvalidShape(e.to_string()))?;
 

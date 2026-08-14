@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 use image::{DynamicImage, GenericImageView};
@@ -7,12 +6,11 @@ use once_cell::sync::Lazy;
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use crate::ocr::OcrError;
 use crate::ocr::constants::*;
 use crate::ocr::detect::{BBox, detect_text_with_paddleocr};
 
-static REC_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
 static CHAR_DICT: Lazy<Mutex<Option<Vec<String>>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn ocr(image: &DynamicImage) -> Result<Vec<(BBox, String, f32)>, OcrError> {
@@ -47,14 +45,10 @@ fn crop_region(image: &DynamicImage, bbox: &BBox) -> DynamicImage {
 }
 
 fn recognize_text(region: &DynamicImage) -> Result<String, OcrError> {
-    let mut lock = REC_SESSION
-        .lock()
+    let path = hf_hub_download(REC_REPO_ID, REC_MODEL_PATH, None, None)?;
+    let session = get_or_create_session(path)?;
+    let mut session = lock_session(&session)
         .map_err(|e| OcrError::Inference(InferenceError::Initialization(e.to_string())))?;
-    if lock.is_none() {
-        let path = hf_hub_download(REC_REPO_ID, REC_MODEL_PATH, None, None)?;
-        *lock = Some(create_onnx_session(path)?);
-    }
-    let session = lock.as_mut().unwrap();
 
     let input_tensor = preprocess_rec(region)?;
 

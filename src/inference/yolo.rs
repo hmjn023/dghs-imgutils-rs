@@ -2,12 +2,9 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{InferenceError, create_onnx_session, run_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session, run_onnx_session};
 use image::DynamicImage;
 use ndarray::Array4;
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// YOLO 検出結果
 #[derive(Debug, Clone)]
@@ -297,10 +294,6 @@ pub fn postprocess_rtdetr(
     Ok(transposed)
 }
 
-// スレッドセーフな ONNX セッションのキャッシュ
-static SESSION_CACHE: Lazy<Mutex<HashMap<(String, String), ort::session::Session>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
 /// 汎用 YOLOv8 物体検出を実行します。
 pub fn yolo_predict(
     image: &DynamicImage,
@@ -311,29 +304,20 @@ pub fn yolo_predict(
     iou_threshold: f32,
     labels: &[String],
 ) -> Result<Vec<DetectionResult>, InferenceError> {
-    let mut cache = SESSION_CACHE
-        .lock()
+    // モデルファイルの解決は HuggingFace 側のキャッシュに任せ、セッションの
+    // 唯一のキャッシュは inference::get_or_create_session に集約する。
+    let model_filename = format!("{}/model.onnx", model_name);
+    let model_path = hf_hub_download(repo_id, &model_filename, None, None)
         .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-    let key = (repo_id.to_string(), model_name.to_string());
-
-    if !cache.contains_key(&key) {
-        // ONNX モデルファイルをダウンロード
-        let model_filename = format!("{}/model.onnx", model_name);
-        let model_path = hf_hub_download(repo_id, &model_filename, None, None)
-            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
-
-        let session = create_onnx_session(model_path)?;
-        cache.insert(key.clone(), session);
-    }
-
-    let session = cache.get_mut(&key).unwrap();
+    let session = get_or_create_session(model_path)?;
 
     // 前処理
     let (input_tensor, old_size, new_size) =
         preprocess_image_yolo(image, max_infer_size, false, 32)?;
 
     // 推論の実行
-    let outputs = run_onnx_session(session, "images", &input_tensor)?;
+    let mut session = lock_session(&session)?;
+    let outputs = run_onnx_session(&mut session, "images", &input_tensor)?;
 
     let output0 = outputs
         .get("output0")

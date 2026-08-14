@@ -12,6 +12,7 @@ use crate::metrics::dbaesthetic::{
 use crate::metrics::laplacian::laplacian_score as core_laplacian_score;
 use crate::metrics::lpips::lpips_clustering as core_lpips_clustering;
 use crate::metrics::psnr_::psnr as core_psnr;
+use crate::napi::inference::{NapiInferenceOptions, run_with_inference_options};
 use napi_derive::napi;
 use std::collections::HashMap;
 
@@ -53,6 +54,7 @@ pub fn psnr(path1: String, path2: String) -> napi::Result<f64> {
 pub fn ccip_batch_extract_features(
     paths: Vec<String>,
     model_name: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<Vec<Vec<f64>>> {
     let images: Vec<image::DynamicImage> = paths
         .iter()
@@ -65,11 +67,13 @@ pub fn ccip_batch_extract_features(
             )
         })?;
     let model = model_name.as_deref().unwrap_or("");
-    let features = core_ccip_batch_extract_features(&images, 384, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("CCIP batch extract failed: {}", e),
-        )
+    let features = run_with_inference_options(inference_options, || {
+        core_ccip_batch_extract_features(&images, 384, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("CCIP batch extract failed: {}", e),
+            )
+        })
     })?;
     Ok(features
         .into_iter()
@@ -110,7 +114,11 @@ pub fn ccip_default_clustering_params(
 
 /// アニメ画像の美的スコアを返します。
 #[napi]
-pub fn anime_dbaesthetic(path: String, model_name: Option<String>) -> napi::Result<f64> {
+pub fn anime_dbaesthetic(
+    path: String,
+    model_name: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<f64> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -118,11 +126,13 @@ pub fn anime_dbaesthetic(path: String, model_name: Option<String>) -> napi::Resu
         )
     })?;
     let model = model_name.as_deref();
-    let score = core_anime_dbaesthetic(&image, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Aesthetic scoring failed: {}", e),
-        )
+    let score = run_with_inference_options(inference_options, || {
+        core_anime_dbaesthetic(&image, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Aesthetic scoring failed: {}", e),
+            )
+        })
     })?;
     Ok(score as f64)
 }
@@ -139,6 +149,7 @@ pub struct DbaestheticFullResult {
 pub fn anime_dbaesthetic_full(
     path: String,
     model_name: Option<String>,
+    inference_options: Option<NapiInferenceOptions>,
 ) -> napi::Result<DbaestheticFullResult> {
     let image = image::open(&path).map_err(|e| {
         napi::Error::new(
@@ -147,11 +158,13 @@ pub fn anime_dbaesthetic_full(
         )
     })?;
     let model = model_name.as_deref();
-    let (score, details) = core_anime_dbaesthetic_full(&image, model).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Aesthetic scoring failed: {}", e),
-        )
+    let (score, details) = run_with_inference_options(inference_options, || {
+        core_anime_dbaesthetic_full(&image, model).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Aesthetic scoring failed: {}", e),
+            )
+        })
     })?;
     Ok(DbaestheticFullResult {
         score: score as f64,
@@ -162,7 +175,11 @@ pub fn anime_dbaesthetic_full(
 /// LPIPS ベースのクラスタリングを実行します。
 /// 画像のパスの配列を受け取り、クラスタラベルの配列を返します。
 #[napi]
-pub fn lpips_clustering(paths: Vec<String>, threshold: Option<f64>) -> napi::Result<Vec<i32>> {
+pub fn lpips_clustering(
+    paths: Vec<String>,
+    threshold: Option<f64>,
+    inference_options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<i32>> {
     let images: Vec<image::DynamicImage> = paths
         .iter()
         .map(|p| image::open(p))
@@ -174,11 +191,13 @@ pub fn lpips_clustering(paths: Vec<String>, threshold: Option<f64>) -> napi::Res
             )
         })?;
     let th = threshold.map(|v| v as f32);
-    let clusters = core_lpips_clustering(&images, th).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("LPIPS clustering failed: {}", e),
-        )
+    let clusters = run_with_inference_options(inference_options, || {
+        core_lpips_clustering(&images, th).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("LPIPS clustering failed: {}", e),
+            )
+        })
     })?;
     Ok(clusters.into_iter().map(|v| v as i32).collect())
 }

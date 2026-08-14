@@ -5,18 +5,17 @@ use std::sync::Mutex;
 use image::DynamicImage;
 use ndarray::{Array2, Array4};
 use once_cell::sync::Lazy;
-use ort::session::Session;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::image::{force_image_background, to_ndarray_chw};
-use crate::inference::create_onnx_session;
+use crate::inference::{SharedSession, get_or_create_session, lock_session};
 
 const DEFAULT_REPO_ID: &str = "deepghs/clip_onnx";
 
 struct ClipModelEntry {
-    image_encoder: Session,
-    text_encoder: Session,
+    image_encoder: SharedSession,
+    text_encoder: SharedSession,
     logit_scale: f32,
     input_size: u32,
 }
@@ -52,8 +51,8 @@ fn ensure_clip_model(repo_id: &str, model_name: &str) -> Result<(), GenericError
     let logit_scale = meta["logit_scale"].as_f64().unwrap_or(4.605170185988091) as f32;
     let input_size = meta["input_size"].as_u64().unwrap_or(224) as u32;
 
-    let image_encoder = create_onnx_session(&image_encoder_path)?;
-    let text_encoder = create_onnx_session(&text_encoder_path)?;
+    let image_encoder = get_or_create_session(&image_encoder_path)?;
+    let text_encoder = get_or_create_session(&text_encoder_path)?;
 
     let entry = ClipModelEntry {
         image_encoder,
@@ -107,9 +106,10 @@ pub fn clip_image_encode(
             .assign(&tensor.slice(ndarray::s![0, .., .., ..]));
     }
 
-    let outputs = entry
-        .image_encoder
-        .run(ort::inputs!["pixel_values" => ort::value::Tensor::from_array(batch)?])?;
+    let mut image_encoder = lock_session(&entry.image_encoder)?;
+    let outputs = image_encoder.run(ort::inputs![
+        "pixel_values" => ort::value::Tensor::from_array(batch)?
+    ])?;
 
     let extract = |name: &str| -> Result<Vec<Vec<f32>>, GenericError> {
         let val = outputs
@@ -258,7 +258,8 @@ pub fn clip_text_encode(
         }
     }
 
-    let outputs = entry.text_encoder.run(ort::inputs![
+    let mut text_encoder = lock_session(&entry.text_encoder)?;
+    let outputs = text_encoder.run(ort::inputs![
         "input_ids" => ort::value::Tensor::from_array(input_ids)?,
         "attention_mask" => ort::value::Tensor::from_array(attention_mask)?,
     ])?;

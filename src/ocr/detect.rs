@@ -1,30 +1,20 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
-
 use image::{DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma};
 use imageproc::contours::{BorderType, find_contours};
 use ndarray::{Array2, Array4};
-use once_cell::sync::Lazy;
 
 use crate::hub::hf_hub_download;
 use crate::image::to_ndarray_chw;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, get_or_create_session, lock_session};
 use crate::ocr::OcrError;
 use crate::ocr::constants::*;
-
-static DET_SESSION: Lazy<Mutex<Option<ort::session::Session>>> = Lazy::new(|| Mutex::new(None));
 
 pub type BBox = (i32, i32, i32, i32);
 
 pub fn detect_text_with_paddleocr(image: &DynamicImage) -> Result<Vec<(BBox, f32)>, OcrError> {
-    let mut lock = DET_SESSION
-        .lock()
+    let path = hf_hub_download(DET_REPO_ID, DET_MODEL_PATH, None, None)?;
+    let session = get_or_create_session(path)?;
+    let mut session = lock_session(&session)
         .map_err(|e| OcrError::Inference(InferenceError::Initialization(e.to_string())))?;
-    if lock.is_none() {
-        let path = hf_hub_download(DET_REPO_ID, DET_MODEL_PATH, None, None)?;
-        *lock = Some(create_onnx_session(path)?);
-    }
-    let session = lock.as_mut().unwrap();
 
     let (input_tensor, orig_w, orig_h, ratio_w, ratio_h) = preprocess_det(image)?;
 

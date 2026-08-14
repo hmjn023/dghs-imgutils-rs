@@ -16,16 +16,15 @@
 use crate::edge::canny::EdgeError;
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::create_onnx_session;
+use crate::inference::{SharedSession, get_or_create_session, lock_session};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use ndarray::Array4;
 use once_cell::sync::Lazy;
-use ort::session::Session;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-static LINEART_CACHE: Lazy<Mutex<HashMap<String, Session>>> =
+static LINEART_CACHE: Lazy<Mutex<HashMap<String, SharedSession>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Python の `resize_image(img, resolution, align=64)` と等価なリサイズを行います。
@@ -54,11 +53,11 @@ pub(crate) fn resize_image_align(img: &DynamicImage, resolution: u32, align: u32
     img.resize_exact(new_w, new_h, filter)
 }
 
-fn load_lineart_session(coarse: bool) -> Result<(), EdgeError> {
+fn load_lineart_session(coarse: bool) -> Result<SharedSession, EdgeError> {
     let key = if coarse { "coarse" } else { "normal" };
     {
-        if LINEART_CACHE.lock().unwrap().contains_key(key) {
-            return Ok(());
+        if let Some(session) = LINEART_CACHE.lock().unwrap().get(key) {
+            return Ok(session.clone());
         }
     }
     let filename = if coarse {
@@ -69,12 +68,12 @@ fn load_lineart_session(coarse: bool) -> Result<(), EdgeError> {
     let model_path = hf_hub_download("deepghs/imgutils-models", filename, None, None)
         .map_err(|e| EdgeError::Processing(e.to_string()))?;
     let session =
-        create_onnx_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
+        get_or_create_session(&model_path).map_err(|e| EdgeError::Processing(e.to_string()))?;
     LINEART_CACHE
         .lock()
         .unwrap()
-        .insert(key.to_string(), session);
-    Ok(())
+        .insert(key.to_string(), session.clone());
+    Ok(session)
 }
 
 /// Lineart モデルによるエッジマスク（float32 [H, W]）を返します。
@@ -98,10 +97,8 @@ pub fn get_edge_by_lineart(
     // [0, 1] 正規化 + CHW
     let tensor = image_to_tensor_01(&resized, rw, rh);
 
-    load_lineart_session(coarse)?;
-    let key = if coarse { "coarse" } else { "normal" };
-    let mut cache = LINEART_CACHE.lock().unwrap();
-    let session = cache.get_mut(key).unwrap();
+    let session = load_lineart_session(coarse)?;
+    let mut session = lock_session(&session).map_err(|e| EdgeError::Processing(e.to_string()))?;
 
     let tensor_val = ort::value::Tensor::from_array(tensor.clone())
         .map_err(|e| EdgeError::Processing(e.to_string()))?;

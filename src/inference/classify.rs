@@ -12,7 +12,7 @@
 
 use crate::hub::hf_hub_download;
 use crate::image::force_image_background;
-use crate::inference::{InferenceError, create_onnx_session};
+use crate::inference::{InferenceError, SharedSession, get_or_create_session, lock_session};
 use image::DynamicImage;
 use image::imageops::FilterType;
 use ndarray::Array4;
@@ -30,7 +30,7 @@ struct MetaJson {
 
 /// ロード済みモデルのキャッシュエントリ
 struct ClassifyEntry {
-    session: Session,
+    session: SharedSession,
     labels: Vec<String>,
     input_w: u32,
     input_h: u32,
@@ -63,10 +63,13 @@ fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), Inferenc
     let meta: MetaJson = serde_json::from_str(&meta_str)
         .map_err(|e| InferenceError::Initialization(format!("meta.json parse error: {}", e)))?;
 
-    let session = create_onnx_session(&model_path)?;
+    let session = get_or_create_session(&model_path)?;
 
     // 入力サイズをモデルメタから取得（fallback: 224x224）
-    let (input_w, input_h) = get_model_input_size(&session);
+    let (input_w, input_h) = {
+        let session_guard = lock_session(&session)?;
+        get_model_input_size(&session_guard)
+    };
 
     let entry = ClassifyEntry {
         session,
@@ -109,9 +112,10 @@ pub fn classify_predict(
         .ok_or_else(|| InferenceError::Initialization("Model not found in cache".to_string()))?;
 
     let tensor = preprocess_classify(image, entry.input_w, entry.input_h)?;
-    let outputs = entry
-        .session
-        .run(ort::inputs!["input" => ort::value::Tensor::from_array(tensor.clone())?])?;
+    let mut session = lock_session(&entry.session)?;
+    let outputs = session.run(ort::inputs![
+        "input" => ort::value::Tensor::from_array(tensor.clone())?
+    ])?;
 
     let (_, output_slice) = outputs["output"]
         .try_extract_tensor::<f32>()
