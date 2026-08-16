@@ -220,7 +220,17 @@ cargo build --release --all-features
 ```
 
 `--all-features` is a compile check, not proof that every provider is available
-on the host.
+on the host. The opt-in `all-providers` feature is equivalent when a caller
+needs to name the feature set explicitly:
+
+```bash
+cargo build --release --features all-providers
+```
+
+The package's N-API build keeps the default CPU-safe behaviour on non-Linux
+platforms. Linux N-API builds include the dynamically loaded CUDA binding so a
+compatible NVIDIA runtime can be selected without passing a Cargo feature from
+the consuming application.
 
 ### ONNX Runtime loading
 
@@ -228,6 +238,13 @@ The `ort` configuration in this project uses dynamic loading, so it does not
 download or statically link a bundled ONNX Runtime. `ORT_DYLIB_PATH` must point
 to a compatible `libonnxruntime.so`; execution-provider shared libraries and
 their vendor dependencies must be discoverable by the dynamic loader.
+
+On Linux, the library also prepares the common CUDA/cuDNN installation paths
+before the first provider probe or session. It loads known vendor SONAMEs into
+the global loader scope, covering the same symbol visibility normally supplied
+by `LD_PRELOAD`. This removes the need for consumers to add a cuDNN preload for
+the standard `/opt/cuda` and `/usr/lib` layouts. The runtime and driver are
+still host prerequisites and are never bundled by this package.
 
 The crate exposes CUDA, TensorRT, DirectML, OpenVINO, MIGraphX, and Vitis-AI
 as optional Cargo features. At process startup, `ort` loads exactly one ONNX
@@ -261,8 +278,9 @@ linking guide](https://github.com/pykeio/ort/blob/main/docs/content/setup/linkin
 
 ### Common worker startup
 
-Each worker should use one provider feature set, one compatible runtime profile,
-an explicit backend, and its own cache directory:
+Each worker should use one compatible runtime profile and its own cache
+directory. The native addon defaults to `auto`; an explicit backend is only
+needed when the application wants a strict device contract:
 
 This repository provides the library/native addon, not a long-running RPC
 worker or scheduler. The application that embeds it is responsible for
@@ -276,6 +294,12 @@ export DGHS_PRECISION=fp32
 export ORT_DYLIB_PATH=/opt/dghs/ort-cpu/lib/libonnxruntime.so
 export IU_HOME=/var/cache/dghs/cpu
 ```
+
+With `auto`, the library tries provider candidates in order and commits the
+model for each candidate before accepting it. A provider that reports itself as
+available but cannot create the model session is rejected and the next
+candidate is tried; CPU is the final fallback. A normal N-API call therefore
+does not need `DGHS_BACKEND`, `LD_PRELOAD`, or provider-specific setup code.
 
 Before sending real jobs, print the capability matrix and create a strict test
 session with a small ONNX model:
@@ -433,9 +457,9 @@ send each request to the appropriate worker.
 `DGHS_BACKEND=amd-gpu`, `amd-npu`, and `cpu` are strict selections. Provider
 initialization, model support, and compilation failures are returned as
 `BackendUnavailable`, `ModelUnsupported`, or `CompilationFailed`; an explicit
-AMD worker never silently falls back to CPU. The legacy `auto` setting remains
-available for compatibility and retains the existing automatic provider
-policy.
+AMD worker never silently falls back to CPU. The `auto` setting performs the
+same provider selection internally, but additionally validates each candidate
+by creating the requested model session before returning it.
 
 The `amd-gpu` feature enables the [ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html).
 The [Radeon 8060S](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html)

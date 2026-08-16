@@ -445,6 +445,12 @@ pub fn choose_backend(
 /// can be registered. It does not guarantee that every model or operator is
 /// supported; that still requires a session-creation smoke test.
 pub fn probe_backend(backend: Backend) -> BackendCapabilities {
+    // Provider availability checks can load vendor libraries. Prepare the
+    // runtime before asking `ort` to inspect a provider.
+    if !matches!(backend, Backend::Cpu) {
+        let _ = crate::inference::init_onnx_runtime();
+    }
+
     match backend {
         Backend::Auto => BackendCapabilities {
             backend,

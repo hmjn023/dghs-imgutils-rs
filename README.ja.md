@@ -219,7 +219,15 @@ cargo build --release --all-features
 ```
 
 `--all-features`はcompile確認であり、対象hostで全providerが利用可能である証拠では
-ありません。
+ありません。feature setを明示する場合はopt-inの`all-providers`を使えます。
+
+```bash
+cargo build --release --features all-providers
+```
+
+packageのN-API buildは、Linux以外では従来どおりCPU-safeな構成を使います。
+LinuxのN-API buildにはdynamic loading用のCUDA bindingが含まれるため、利用側が
+Cargo featureを渡さなくても、互換性のあるNVIDIA Runtimeがあれば自動選択できます。
 
 ### ONNX Runtimeの配置とdynamic loading
 
@@ -227,6 +235,12 @@ cargo build --release --all-features
 しません。`ORT_DYLIB_PATH`には互換性のある`libonnxruntime.so`を1つ指定し、
 Execution Provider共有ライブラリとvendor依存ライブラリをdynamic loaderから
 探索できるようにします。
+
+Linuxでは、最初のprovider probeまたはsession作成前に、標準的なCUDA/cuDNN配置も
+内部で準備します。既知のvendor SONAMEをglobal loader scopeへロードするため、
+通常`LD_PRELOAD`で必要だったsymbol visibilityをlibrary側で処理します。これにより
+`/opt/cuda`や`/usr/lib`の一般的な配置では、利用側がcuDNNのpreloadを追加する必要は
+ありません。ただしRuntimeやdriver自体はhost側に必要で、packageには同梱しません。
 
 `ORT_DYLIB_PATH`はONNX Runtime core libraryの単一パスであり、複数パスを並べる
 変数ではありません。ただし、1つのカスタムRuntime配布物が複数の互換providerを
@@ -253,8 +267,9 @@ export LD_LIBRARY_PATH=/opt/dghs/ort-profile/lib:${LD_LIBRARY_PATH:-}
 
 ### 共通workerの起動
 
-各workerは、1つのprovider feature set、互換性のあるRuntime profile、明示的なbackend、
-専用のcache directoryで起動します。
+各workerは、互換性のあるRuntime profileと専用のcache directoryで起動します。
+native addonのdefaultは`auto`であり、strictなdevice契約が必要な場合だけbackendを
+明示します。
 
 このrepositoryはlibrary/native addonを提供しますが、常駐RPC workerやschedulerは
 提供しません。利用側applicationがRuntime profileごとにprocessを起動し、適切なprocessへ
@@ -268,6 +283,11 @@ export DGHS_PRECISION=fp32
 export ORT_DYLIB_PATH=/opt/dghs/ort-cpu/lib/libonnxruntime.so
 export IU_HOME=/var/cache/dghs/cpu
 ```
+
+`auto`ではprovider候補ごとに実際にmodel sessionを作成してから採用します。
+providerがavailableを返してもsession作成に失敗した場合は、その候補を捨てて次へ進み、
+最後にCPUをfallbackとして試します。そのため通常のN-API呼び出しでは、`DGHS_BACKEND`、
+`LD_PRELOAD`、provider固有の初期化コードを利用側へ追加する必要はありません。
 
 実際のジョブを送る前に、capability matrixを表示し、小さなONNX modelでstrict
 sessionを作成します。
@@ -421,8 +441,9 @@ GPUとNPUで異なるONNX Runtime/provider配布物が必要な場合は、GPU w
 `DGHS_BACKEND=amd-gpu`、`amd-npu`、`cpu`はstrict指定です。provider初期化、
 モデル非対応、compile失敗は`BackendUnavailable`、`ModelUnsupported`、
 `CompilationFailed`として返し、明示的なAMD workerがCPUへ黙ってfallbackする
-ことはありません。既存APIとの互換性のため`auto`も残し、従来の自動provider
-選択を維持します。
+ことはありません。`auto`はprovider候補ごとのsession作成までlibrary内部で検証し、
+成功したbackendを採用します。provider登録だけ成功して実際はCPUへ落ちる状態を
+自動選択の成功とは扱いません。
 
 `amd-gpu` featureは[ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html)を有効化します。
 [Radeon 8060SのGPU target](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html)は`gfx1151`です。ROCmとkernelの組み合わせは実機で検証し、

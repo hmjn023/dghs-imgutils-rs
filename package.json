@@ -10,14 +10,15 @@
     "index.js",
     "index.d.ts",
     "src/",
+    "scripts/",
     "build.rs",
     "Cargo.toml",
     "Cargo.lock"
   ],
   "scripts": {
-    "build": "napi build --platform --dts index.d.ts --release --cargo-flags=--lib",
-    "build:debug": "napi build --platform --dts index.d.ts --cargo-flags=--lib",
-    "postinstall": "napi build --platform --dts index.d.ts --release --cargo-flags=--lib"
+    "build": "node scripts/build-native.mjs --release",
+    "build:debug": "node scripts/build-native.mjs",
+    "postinstall": "node scripts/build-native.mjs --release"
   },
   "dependencies": {
     "@napi-rs/cli": "^2.18.4"
