@@ -209,6 +209,8 @@ mod tests {
 
     fn empty_options() -> NapiInferenceOptions {
         NapiInferenceOptions {
+            provider: None,
+            device: None,
             backend: None,
             precision: None,
             device_id: None,

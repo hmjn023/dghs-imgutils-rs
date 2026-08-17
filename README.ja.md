@@ -221,6 +221,16 @@ cargo build --release --all-features
 `--all-features`はcompile確認であり、対象hostで全providerが利用可能である証拠では
 ありません。
 
+全provider feature setを明示する必要がある場合は、opt-inの`all-providers`を使えます。
+
+```bash
+cargo build --release --features all-providers
+```
+
+N-APIのbuild scriptはLinuxでは`cuda,openvino`、Windowsでは`openvino`を自動的に
+選択します。provider runtimeやhardware driverを同梱するわけではないため、同じnative
+addonをhostにインストールされた互換Runtimeで利用できます。
+
 ### ONNX Runtimeの配置とdynamic loading
 
 このcrateの`ort`はdynamic loadingを使うため、ONNX Runtimeを静的リンク・同梱
@@ -245,6 +255,15 @@ export ORT_DYLIB_PATH=/opt/dghs/ort-profile/lib/libonnxruntime.so
 export LD_LIBRARY_PATH=/opt/dghs/ort-profile/lib:${LD_LIBRARY_PATH:-}
 ```
 
+Linuxでは、libraryがprovider探索前にCUDA/cuDNNとOpenVINO core/TBBの主な依存
+ライブラリを準備します。`ORT_DYLIB_PATH`のあるdirectory、provider path用環境変数、
+標準runtime directoryをlibrary側で探索するため、利用側が手書きの`dlopen`やpreload
+処理を実装する必要はありません。OpenVINOのGPU/NPU pluginとLevel Zero/OpenCLの
+driver libraryは、version違いのsymbol衝突を避けるためprovider本来のload境界に任せます。
+標準外のOpenVINO配置では`DGHS_OPENVINO_LIBRARY_PATH`を指定してください。ORT core、
+provider、vendor runtimeの互換性とIntel/NVIDIAのkernel driverは引き続きhost側で
+用意する必要があります。
+
 異なるORT、ROCm、CUDA、OpenVINO、TensorRTの配布物からcore/providerを混在させない
 でください。詳細は[ONNX Runtime Execution Provider一覧](https://onnxruntime.ai/docs/execution-providers/)、
 [provider build guide](https://onnxruntime.ai/docs/build/eps.html)、`ort`の
@@ -253,8 +272,9 @@ export LD_LIBRARY_PATH=/opt/dghs/ort-profile/lib:${LD_LIBRARY_PATH:-}
 
 ### 共通workerの起動
 
-各workerは、1つのprovider feature set、互換性のあるRuntime profile、明示的なbackend、
-専用のcache directoryで起動します。
+各workerは、1つのprovider feature set、互換性のあるRuntime profile、専用のcache
+directoryで起動します。strictなdevice契約が必要な場合だけbackendを明示し、それ以外は
+libraryのautomatic policyを利用できます。
 
 このrepositoryはlibrary/native addonを提供しますが、常駐RPC workerやschedulerは
 提供しません。利用側applicationがRuntime profileごとにprocessを起動し、適切なprocessへ
@@ -281,6 +301,11 @@ workerに対応するfeature setへ置き換えてください。probeはロー�
 providerがあるかを確認しますが、provider probeの成功だけでは特定modelのcompile・
 実行成功までは保証しません。
 
+`DGHS_BACKEND=auto`では、libraryがprovider候補ごとに対象modelのsessionを実際に作成して
+から採用し、最後にCPUへfallbackします。backendを明示した場合、または`GPU`/`NPU`などの
+`DGHS_ORT_DEVICE`を明示した場合はstrictとなり、初期化・session errorをCPUへ隠れて
+fallbackせず返します。
+
 ### 環境変数
 
 これらはsession作成時に読み込まれます。programmaticな`configureInference`はworkerの
@@ -293,6 +318,7 @@ defaultとして環境変数より優先され、N-API関数の最後の`inferen
 | `DGHS_PRECISION` | `fp16` | `auto`、`fp32`、`fp16`、`bf16`、`int8` |
 | `DGHS_DEVICE_ID` | `0` | GPU/providerのdevice ordinal |
 | `DGHS_ORT_DEVICE` | `GPU` | OpenVINO device policy（`CPU`、`GPU`、`NPU`、`AUTO`など） |
+| `DGHS_OPENVINO_LIBRARY_PATH` | `/opt/intel/openvino/runtime/lib/intel64` | Linuxで追加するOpenVINO runtime探索先 |
 | `DGHS_VITIS_CONFIG` | `/opt/vitis-ai/model.json` | Vitis-AI compiler/provider設定（必須） |
 | `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | Vitis-AIのprovider compile/cache directory（AMD NPU専用、MIGraphXでは使用しません） |
 | `DGHS_MIGRAPHX_INT8_CALIBRATION_TABLE` | `/opt/models/calibration.table` | MIGraphX INT8 calibration table |
@@ -359,14 +385,14 @@ programmatic設定は`DGHS_*`環境変数より優先されます。
 
 ```rust
 use dghs_imgutils_rs::inference::{
-    configure_inference, Backend, Precision, SessionOptions,
+    configure_inference, DeviceProvider, DeviceSelection, Precision, SessionOptions,
 };
 
-configure_inference(
-    SessionOptions::for_backend(Backend::AmdGpu)
-        .with_precision(Precision::Fp16)
-        .with_device_id(0),
-)?;
+let options = SessionOptions::for_device(
+    DeviceSelection::new(DeviceProvider::AmdGpu).with_device("0"),
+)?
+.with_precision(Precision::Fp16);
+configure_inference(options)?;
 ```
 
 TypeScript側からも同じ設定が可能です。
@@ -374,9 +400,16 @@ TypeScript側からも同じ設定が可能です。
 ```typescript
 import { configureInference, getInferenceConfiguration } from 'dghs-imgutils-rs';
 
-configureInference({ backend: 'amd-gpu', precision: 'fp16', deviceId: 0 });
+configureInference({ provider: 'amd_gpu', precision: 'fp16' });
+configureInference({ provider: 'cuda', device: '1' });
 console.log(getInferenceConfiguration());
 ```
+
+`provider`には`cpu`、`cuda`、`tensorrt`、`directml`、`intel_gpu`、`intel_npu`、
+`amd_gpu`、`amd_npu`、`openvino`を指定できます。`device`は任意で、CUDA、TensorRT、
+AMD GPU、DirectMLでは`"1"`のようなordinal、Intelでは`"0"`、`"GPU.0"`、`"NPU.0"`を
+指定します。省略時はproviderのデフォルトdevice選択に任せます。従来の`backend`、
+`deviceId`、`openvinoDeviceType`も互換用に利用できます。
 
 UIから呼び出しごとに選択する場合は、モデルを使うN-API関数の最後の引数に
 任意の`inferenceOptions`を渡せます。既存の引数を壊さず、リクエスト単位で
@@ -386,13 +419,13 @@ backend、precision、deviceを選択できます。
 import { getPixaiTags } from 'dghs-imgutils-rs';
 
 const gpu = await getPixaiTags(imagePath, undefined, undefined, {
-  backend: 'amd-gpu',
+  provider: 'amd_gpu',
   precision: 'fp16',
-  deviceId: 0,
+  device: '0',
 });
 
 const cpu = await getPixaiTags(imagePath, undefined, undefined, {
-  backend: 'cpu',
+  provider: 'cpu',
   precision: 'fp32',
 });
 ```
@@ -403,10 +436,15 @@ model/backend/precision/deviceごとに分離されるため、元の設定へ�
 sessionを再利用できます。処理中の呼び出しは開始時に選択したsessionを使い続け、
 UIの変更は新しい呼び出しにだけ反映されます。
 
-OpenVINOを使う場合は、Rustでは`.with_openvino_device_type("GPU")`、TypeScriptでは
-`openvinoDeviceType: 'GPU'`を指定します。
+Intel OpenVINOを使う場合は、Rustでは`DeviceProvider::IntelGpu`または
+`DeviceProvider::IntelNpu`、TypeScriptでは`provider: 'intel_gpu'`または
+`provider: 'intel_npu'`を指定します。特定deviceを選ぶ場合だけ任意の`device: '0'`
+（または`'GPU.0'`/`'NPU.0'`）を追加します。従来の`.with_openvino_device_type("GPU")`と
+`openvinoDeviceType: 'GPU'`も引き続き利用できます。
 
-ロード済みruntimeのproviderを確認するには`probeInferenceBackends()`を使います。
+ロード済みruntimeのproviderを確認するには、programmaticなdevice policyを渡して
+`probeInferenceBackends({ provider: 'intel_npu' })`を呼びます。引数なしなら現在のworker
+設定を使います。
 ONNX Runtimeとprovider libraryはprocess単位なので、設定はapplication起動時に一度
 行ってください。`configureInference`は起動時のデフォルトであり、呼び出し単位では
 ロード済みruntimeに存在するproviderの中から`inferenceOptions`で選択できます。
@@ -421,8 +459,8 @@ GPUとNPUで異なるONNX Runtime/provider配布物が必要な場合は、GPU w
 `DGHS_BACKEND=amd-gpu`、`amd-npu`、`cpu`はstrict指定です。provider初期化、
 モデル非対応、compile失敗は`BackendUnavailable`、`ModelUnsupported`、
 `CompilationFailed`として返し、明示的なAMD workerがCPUへ黙ってfallbackする
-ことはありません。既存APIとの互換性のため`auto`も残し、従来の自動provider
-選択を維持します。
+ことはありません。`auto`ではprovider候補ごとに対象modelのsessionを作成してから
+採用し、最後にCPUへfallbackします。
 
 `amd-gpu` featureは[ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html)を有効化します。
 [Radeon 8060SのGPU target](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html)は`gfx1151`です。ROCmとkernelの組み合わせは実機で検証し、
@@ -579,10 +617,12 @@ uv pip install --target .ort-runtime \
 export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
 ```
 
-systemのOpenVINOを使う場合は、native application用の環境設定scriptを先に読み込みます。
+systemのOpenVINOを使う場合、libraryは標準的なruntime libraryを自動解決します。driver/ICD
+環境の設定に必要な場合だけvendorのscriptを読み込むか、custom runtime directoryを指定します。
 
 ```bash
 source /opt/intel/openvino/setupvars.sh
+export DGHS_OPENVINO_LIBRARY_PATH=/opt/intel/openvino/runtime/lib/intel64
 cargo build --release --features openvino
 ```
 
@@ -592,12 +632,20 @@ cargo build --release --features openvino
 # Intel NPU
 export DGHS_ORT_DEVICE=NPU
 
-# Intel XPU/GPU。LinuxではIntel OpenCL ICDを明示する
+# Intel XPU/GPU。LinuxではIntel OpenCL ICDをlibraryが自動選択する
 export DGHS_ORT_DEVICE=GPU
-export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
+# 明示的に上書きする場合だけ設定する
+# export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
 ```
 
-未設定時は `AUTO:NPU,GPU,CPU` で、NPU → GPU → CPUの順に選択します。アプリケーションを起動するプロセスに `ORT_DYLIB_PATH` と上記の環境変数を設定してください。GPUを使うLinux環境では、Intel GPUドライバーと `/etc/OpenCL/vendors/` 内のICDファイルが必要です。
+未設定時は、hostから見えているIntel deviceをlibraryが検査し、`AUTO:NPU,GPU,CPU`、
+`AUTO:GPU,CPU`、`AUTO:CPU`などのOpenVINO policyを自動生成します。その後、候補ごとに
+対象modelのsessionを実際に作成し、autoでは最後にCPUへfallbackします。アプリケーションを
+起動するprocessに`ORT_DYLIB_PATH`と上記の環境変数を設定してください。GPUを使うLinux
+環境では、Intel GPU driverとIntel ICD fileが必要です。NPU実行には`/dev/accel/*`（通常は
+`render` group）へのアクセス権も必要です。`OCL_ICD_VENDORS`が未設定で、
+`/etc/OpenCL/vendors/intel.icd`（または標準の`/usr/share/OpenCL/vendors/intel.icd`）が存在する
+場合は、OpenVINO初期化前にlibraryが自動選択します。既存の`OCL_ICD_VENDORS`設定は維持します。
 
 strictにproviderを選択する場合はbackendも指定します。
 
@@ -619,9 +667,14 @@ npm run build
 動作確認用の最小モデルでRust側のセッション作成を確認できます。
 
 ```bash
-cargo run --no-default-features --example intel_ep_probe -- \
-  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+cargo run --no-default-features --features openvino --example intel_ep_probe -- --run \
+  --provider intel_npu --device 0 .ort-runtime/onnxruntime/datasets/sigmoid.onnx
 ```
+
+明示的な`provider`はstrict指定です。deviceの初期化やmodelのcommitに失敗した場合、
+libraryはCPUへ隠れてfallbackせずerrorを返します。CPU fallbackが許可されるのはauto
+policyです。`--run`付きprobeはsession作成と実際の推論を検証し、`ep_probe`はprovider
+capabilityの診断に使用します。
 
 `onnxruntime-openvino` の共有ライブラリは、[ONNX Runtime OpenVINO Execution Provider](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html) の公式配布物です。別のOpenVINO共有ライブラリを混在させず、同じ `capi` ディレクトリのファイル一式を使ってください。
 

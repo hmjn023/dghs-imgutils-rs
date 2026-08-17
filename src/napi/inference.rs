@@ -1,13 +1,56 @@
 //! Programmatic inference-worker configuration for Node.js/TypeScript.
 
 use crate::inference::{
-    Backend, BackendCapabilities, InferenceError, Precision, SessionOptions,
-    configure_inference as configure_core_inference,
+    Backend, BackendCapabilities, DeviceProvider, DeviceSelection, InferenceError, Precision,
+    SessionOptions, configure_inference as configure_core_inference,
     current_inference_options as current_core_inference_options,
-    probe_backends as probe_core_backends, reset_inference_configuration as reset_core_inference,
+    probe_backends_with_options as probe_core_backends,
+    reset_inference_configuration as reset_core_inference,
 };
 use napi_derive::napi;
 use std::path::PathBuf;
+
+/// Provider names accepted by the programmatic `provider`/`device` selector.
+#[napi(string_enum)]
+pub enum NapiInferenceProvider {
+    #[napi(value = "auto")]
+    Auto,
+    #[napi(value = "cpu")]
+    Cpu,
+    #[napi(value = "cuda")]
+    Cuda,
+    #[napi(value = "tensorrt")]
+    TensorRt,
+    #[napi(value = "directml")]
+    DirectMl,
+    #[napi(value = "intel_gpu")]
+    IntelGpu,
+    #[napi(value = "intel_npu")]
+    IntelNpu,
+    #[napi(value = "amd_gpu")]
+    AmdGpu,
+    #[napi(value = "amd_npu")]
+    AmdNpu,
+    #[napi(value = "openvino")]
+    OpenVino,
+}
+
+impl From<NapiInferenceProvider> for DeviceProvider {
+    fn from(provider: NapiInferenceProvider) -> Self {
+        match provider {
+            NapiInferenceProvider::Auto => Self::Auto,
+            NapiInferenceProvider::Cpu => Self::Cpu,
+            NapiInferenceProvider::Cuda => Self::Cuda,
+            NapiInferenceProvider::TensorRt => Self::TensorRt,
+            NapiInferenceProvider::DirectMl => Self::DirectMl,
+            NapiInferenceProvider::IntelGpu => Self::IntelGpu,
+            NapiInferenceProvider::IntelNpu => Self::IntelNpu,
+            NapiInferenceProvider::AmdGpu => Self::AmdGpu,
+            NapiInferenceProvider::AmdNpu => Self::AmdNpu,
+            NapiInferenceProvider::OpenVino => Self::OpenVino,
+        }
+    }
+}
 
 /// Partial worker options accepted by the JavaScript API.
 ///
@@ -18,6 +61,11 @@ use std::path::PathBuf;
 /// programmatic configuration has already been installed).
 #[napi(object)]
 pub struct NapiInferenceOptions {
+    /// Preferred provider-oriented selector, for example `{ provider: 'cuda', device: '1' }`.
+    pub provider: Option<NapiInferenceProvider>,
+    /// Provider-specific device string. It is optional; omitted means provider default.
+    pub device: Option<String>,
+    /// Legacy backend spelling retained for compatibility.
     pub backend: Option<String>,
     pub precision: Option<String>,
     pub device_id: Option<i64>,
@@ -31,6 +79,8 @@ pub struct NapiInferenceOptions {
 /// Effective worker configuration returned to JavaScript.
 #[napi(object)]
 pub struct NapiInferenceConfiguration {
+    pub provider: Option<NapiInferenceProvider>,
+    pub device: Option<String>,
     pub backend: String,
     pub precision: String,
     pub device_id: i64,
@@ -76,35 +126,74 @@ fn merge_options_from(
     mut options: SessionOptions,
     input: NapiInferenceOptions,
 ) -> Result<SessionOptions, InferenceError> {
-    if let Some(backend) = input.backend {
+    let NapiInferenceOptions {
+        provider,
+        device,
+        backend,
+        precision,
+        device_id,
+        openvino_device_type,
+        vitis_config_file,
+        ep_cache_dir,
+        migraphx_int8_calibration_table,
+        migraphx_exhaustive_tune,
+    } = input;
+
+    if provider.is_some() && backend.is_some() {
+        return Err(InferenceError::InvalidInput(
+            "provider and backend cannot be specified together".to_owned(),
+        ));
+    }
+    if (provider.is_some() || device.is_some())
+        && (device_id.is_some() || openvino_device_type.is_some())
+    {
+        return Err(InferenceError::InvalidInput(
+            "provider/device cannot be combined with legacy deviceId/openvinoDeviceType".to_owned(),
+        ));
+    }
+
+    if provider.is_some() || device.is_some() {
+        let provider = provider
+            .map(DeviceProvider::from)
+            .or_else(|| {
+                backend
+                    .as_deref()
+                    .and_then(|value| value.parse::<DeviceProvider>().ok())
+            })
+            .ok_or_else(|| {
+                InferenceError::InvalidInput(
+                    "device requires a provider such as cuda, intel_gpu, or intel_npu".to_owned(),
+                )
+            })?;
+        DeviceSelection { provider, device }.apply_to(&mut options)?;
+    } else if let Some(backend) = backend {
         options.backend = backend
             .parse::<Backend>()
             .map_err(InferenceError::InvalidInput)?;
     }
-    if let Some(precision) = input.precision {
+    if let Some(precision) = precision {
         options.precision = precision
             .parse::<Precision>()
             .map_err(InferenceError::InvalidInput)?;
     }
-    if let Some(device_id) = input.device_id {
+    if let Some(device_id) = device_id {
         options.device_id = usize::try_from(device_id).map_err(|_| {
             InferenceError::InvalidInput("deviceId must be a non-negative integer".to_owned())
         })?;
     }
-    if input.openvino_device_type.is_some() {
-        options.openvino_device_type = input.openvino_device_type;
+    if openvino_device_type.is_some() {
+        options.openvino_device_type = openvino_device_type;
     }
-    if input.vitis_config_file.is_some() {
-        options.vitis_config_file = path_option(input.vitis_config_file);
+    if vitis_config_file.is_some() {
+        options.vitis_config_file = path_option(vitis_config_file);
     }
-    if input.ep_cache_dir.is_some() {
-        options.ep_cache_dir = path_option(input.ep_cache_dir);
+    if ep_cache_dir.is_some() {
+        options.ep_cache_dir = path_option(ep_cache_dir);
     }
-    if input.migraphx_int8_calibration_table.is_some() {
-        options.migraphx_int8_calibration_table =
-            path_option(input.migraphx_int8_calibration_table);
+    if migraphx_int8_calibration_table.is_some() {
+        options.migraphx_int8_calibration_table = path_option(migraphx_int8_calibration_table);
     }
-    if let Some(enabled) = input.migraphx_exhaustive_tune {
+    if let Some(enabled) = migraphx_exhaustive_tune {
         options.migraphx_exhaustive_tune = enabled;
     }
 
@@ -116,7 +205,7 @@ fn merge_options_from(
 ///
 /// `None` preserves the legacy environment/process configuration. A partial
 /// object is merged with the current configuration, so a caller can change
-/// only `backend`, `precision`, or `deviceId` for one request.
+/// only `provider`, `device`, `precision`, or the legacy backend fields for one request.
 pub(crate) fn run_with_inference_options<T>(
     options: Option<NapiInferenceOptions>,
     operation: impl FnOnce() -> napi::Result<T>,
@@ -130,7 +219,10 @@ pub(crate) fn run_with_inference_options<T>(
 }
 
 fn configuration_from(options: SessionOptions) -> NapiInferenceConfiguration {
+    let (provider, device) = provider_configuration(&options);
     NapiInferenceConfiguration {
+        provider,
+        device,
         backend: options.backend.to_string(),
         precision: options.precision.to_string(),
         device_id: options.device_id as i64,
@@ -146,6 +238,54 @@ fn configuration_from(options: SessionOptions) -> NapiInferenceConfiguration {
             .map(|path| path.to_string_lossy().into_owned()),
         migraphx_exhaustive_tune: options.migraphx_exhaustive_tune,
     }
+}
+
+fn provider_configuration(
+    options: &SessionOptions,
+) -> (Option<NapiInferenceProvider>, Option<String>) {
+    match options.backend {
+        Backend::Auto => (None, None),
+        Backend::Cpu => (Some(NapiInferenceProvider::Cpu), None),
+        Backend::Cuda => (Some(NapiInferenceProvider::Cuda), ordinal_device(options)),
+        Backend::TensorRt => (
+            Some(NapiInferenceProvider::TensorRt),
+            ordinal_device(options),
+        ),
+        Backend::DirectMl => (
+            Some(NapiInferenceProvider::DirectMl),
+            ordinal_device(options),
+        ),
+        Backend::AmdGpu => (Some(NapiInferenceProvider::AmdGpu), ordinal_device(options)),
+        Backend::AmdNpu => (Some(NapiInferenceProvider::AmdNpu), None),
+        Backend::OpenVino => {
+            let device_type = options.openvino_device_type.as_deref().unwrap_or("AUTO");
+            let normalized = device_type.to_ascii_uppercase();
+            if let Some(device) = normalized.strip_prefix("GPU") {
+                return (
+                    Some(NapiInferenceProvider::IntelGpu),
+                    openvino_ordinal(device),
+                );
+            }
+            if let Some(device) = normalized.strip_prefix("NPU") {
+                return (
+                    Some(NapiInferenceProvider::IntelNpu),
+                    openvino_ordinal(device),
+                );
+            }
+            (
+                Some(NapiInferenceProvider::OpenVino),
+                Some(device_type.to_owned()),
+            )
+        }
+    }
+}
+
+fn ordinal_device(options: &SessionOptions) -> Option<String> {
+    (options.device_id != 0).then(|| options.device_id.to_string())
+}
+
+fn openvino_ordinal(suffix: &str) -> Option<String> {
+    suffix.strip_prefix('.').map(str::to_owned)
 }
 
 fn capabilities_from(capability: BackendCapabilities) -> NapiBackendCapabilities {
@@ -187,11 +327,17 @@ pub fn get_inference_configuration() -> napi::Result<NapiInferenceConfiguration>
 
 /// Probes providers available in the loaded ONNX Runtime.
 #[napi]
-pub fn probe_inference_backends() -> Vec<NapiBackendCapabilities> {
-    probe_core_backends()
+pub fn probe_inference_backends(
+    options: Option<NapiInferenceOptions>,
+) -> napi::Result<Vec<NapiBackendCapabilities>> {
+    let options = match options {
+        Some(options) => merge_options(options).map_err(to_napi_error)?,
+        None => current_core_inference_options().map_err(to_napi_error)?,
+    };
+    Ok(probe_core_backends(&options)
         .into_iter()
         .map(capabilities_from)
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -201,6 +347,8 @@ mod tests {
 
     fn empty_options() -> NapiInferenceOptions {
         NapiInferenceOptions {
+            provider: None,
+            device: None,
             backend: None,
             precision: None,
             device_id: None,
@@ -222,6 +370,29 @@ mod tests {
 
         assert_eq!(options.backend, Backend::AmdGpu);
         assert_eq!(options.precision, Precision::Fp16);
+    }
+
+    #[test]
+    fn merge_options_accepts_provider_without_a_device() {
+        let mut input = empty_options();
+        input.provider = Some(NapiInferenceProvider::Cuda);
+
+        let options = merge_options_from(SessionOptions::default(), input).unwrap();
+
+        assert_eq!(options.backend, Backend::Cuda);
+        assert_eq!(options.device_id, 0);
+    }
+
+    #[test]
+    fn merge_options_maps_intel_provider_device() {
+        let mut input = empty_options();
+        input.provider = Some(NapiInferenceProvider::IntelGpu);
+        input.device = Some("1".to_owned());
+
+        let options = merge_options_from(SessionOptions::default(), input).unwrap();
+
+        assert_eq!(options.backend, Backend::OpenVino);
+        assert_eq!(options.openvino_device_type.as_deref(), Some("GPU.1"));
     }
 
     #[test]

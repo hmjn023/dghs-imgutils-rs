@@ -222,6 +222,18 @@ cargo build --release --all-features
 `--all-features` is a compile check, not proof that every provider is available
 on the host.
 
+The opt-in `all-providers` feature is equivalent when a caller needs to name
+the complete provider set explicitly:
+
+```bash
+cargo build --release --features all-providers
+```
+
+The N-API build script selects `cuda,openvino` on Linux and `openvino` on
+Windows automatically. It does not bundle a provider runtime or a hardware
+driver; the same native addon can therefore use the compatible runtime that is
+installed on the host.
+
 ### ONNX Runtime loading
 
 The `ort` configuration in this project uses dynamic loading, so it does not
@@ -253,6 +265,17 @@ export ORT_DYLIB_PATH=/opt/dghs/ort-profile/lib/libonnxruntime.so
 export LD_LIBRARY_PATH=/opt/dghs/ort-profile/lib:${LD_LIBRARY_PATH:-}
 ```
 
+On Linux, the library prepares common CUDA/cuDNN and OpenVINO core/TBB
+dependencies before provider discovery. It searches the directory containing
+`ORT_DYLIB_PATH`, the provider-path environment variables, and standard
+runtime directories, so applications do not need handwritten `dlopen` or
+preload code. OpenVINO GPU/NPU plugins and Level Zero/OpenCL driver libraries
+are left to the provider's normal load boundary to avoid cross-version symbol
+collisions. Set `DGHS_OPENVINO_LIBRARY_PATH` when an OpenVINO installation is
+outside those locations. The ORT core, provider libraries, and vendor runtime
+must still come from compatible distributions, and the Intel/NVIDIA kernel
+driver remains a host prerequisite.
+
 Do not mix the core library or provider libraries from different ORT, ROCm,
 CUDA, OpenVINO, or TensorRT builds. See the ONNX Runtime [Execution Provider
 overview](https://onnxruntime.ai/docs/execution-providers/), [provider build
@@ -262,7 +285,8 @@ linking guide](https://github.com/pykeio/ort/blob/main/docs/content/setup/linkin
 ### Common worker startup
 
 Each worker should use one provider feature set, one compatible runtime profile,
-an explicit backend, and its own cache directory:
+and its own cache directory. Set an explicit backend when the worker needs a
+strict device contract; otherwise the library can use its automatic policy:
 
 This repository provides the library/native addon, not a long-running RPC
 worker or scheduler. The application that embeds it is responsible for
@@ -289,6 +313,12 @@ Use the feature set matching the worker. The probe checks provider availability
 in the loaded runtime; a successful provider probe alone does not prove that a
 particular model compiles or runs on that provider.
 
+With `DGHS_BACKEND=auto`, the library creates the requested model session for
+each provider candidate before accepting it and uses CPU as the final fallback.
+An explicit backend, or an explicit `DGHS_ORT_DEVICE` such as `GPU` or `NPU`,
+is strict and returns the initialization/session error instead of silently
+falling back.
+
 ### Environment variables
 
 These variables are read when a session is created. A programmatic
@@ -301,6 +331,7 @@ These variables are read when a session is created. A programmatic
 | `DGHS_PRECISION` | `fp16` | `auto`, `fp32`, `fp16`, `bf16`, or `int8` |
 | `DGHS_DEVICE_ID` | `0` | GPU/provider device ordinal |
 | `DGHS_ORT_DEVICE` | `GPU` | OpenVINO device policy (`CPU`, `GPU`, `NPU`, `AUTO`, ...) |
+| `DGHS_OPENVINO_LIBRARY_PATH` | `/opt/intel/openvino/runtime/lib/intel64` | Additional OpenVINO runtime search path on Linux |
 | `DGHS_VITIS_CONFIG` | `/opt/vitis-ai/model.json` | Required Vitis-AI compiler/provider configuration |
 | `DGHS_EP_CACHE_DIR` | `/var/cache/dghs/ep` | Vitis-AI provider compilation/cache directory (AMD NPU only; not used by MIGraphX) |
 | `DGHS_MIGRAPHX_INT8_CALIBRATION_TABLE` | `/opt/models/calibration.table` | MIGraphX INT8 calibration table |
@@ -370,14 +401,14 @@ call. This takes precedence over `DGHS_*` variables:
 
 ```rust
 use dghs_imgutils_rs::inference::{
-    configure_inference, Backend, Precision, SessionOptions,
+    configure_inference, DeviceProvider, DeviceSelection, Precision, SessionOptions,
 };
 
-configure_inference(
-    SessionOptions::for_backend(Backend::AmdGpu)
-        .with_precision(Precision::Fp16)
-        .with_device_id(0),
-)?;
+let options = SessionOptions::for_device(
+    DeviceSelection::new(DeviceProvider::AmdGpu).with_device("0"),
+)?
+.with_precision(Precision::Fp16);
+configure_inference(options)?;
 ```
 
 The same control is available to TypeScript callers:
@@ -385,9 +416,17 @@ The same control is available to TypeScript callers:
 ```typescript
 import { configureInference, getInferenceConfiguration } from 'dghs-imgutils-rs';
 
-configureInference({ backend: 'amd-gpu', precision: 'fp16', deviceId: 0 });
+configureInference({ provider: 'amd_gpu', precision: 'fp16' });
+configureInference({ provider: 'cuda', device: '1' });
 console.log(getInferenceConfiguration());
 ```
+
+`provider` is one of `cpu`, `cuda`, `tensorrt`, `directml`, `intel_gpu`,
+`intel_npu`, `amd_gpu`, `amd_npu`, or `openvino`. `device` is optional: CUDA,
+TensorRT, AMD GPU, and DirectML accept an ordinal string such as `"1"`; Intel
+providers accept `"0"`, `"GPU.0"`, or `"NPU.0"`. Omitting it delegates the
+provider's default device selection to the runtime. The old `backend`,
+`deviceId`, and `openvinoDeviceType` fields remain as compatibility aliases.
 
 For UI-driven selection, model-backed N-API functions also accept an optional
 `inferenceOptions` object as their final argument. This is call-local, so a UI
@@ -397,13 +436,13 @@ can choose a backend per request while existing calls remain source-compatible:
 import { getPixaiTags } from 'dghs-imgutils-rs';
 
 const gpu = await getPixaiTags(imagePath, undefined, undefined, {
-  backend: 'amd-gpu',
+  provider: 'amd_gpu',
   precision: 'fp16',
-  deviceId: 0,
+  device: '0',
 });
 
 const cpu = await getPixaiTags(imagePath, undefined, undefined, {
-  backend: 'cpu',
+  provider: 'cpu',
   precision: 'fp32',
 });
 ```
@@ -414,10 +453,16 @@ model APIs. Sessions are cached separately by model/backend/precision/device,
 so switching back can reuse a warm session. A request already in progress keeps
 the session it selected; changing the UI selection affects new calls only.
 
-For OpenVINO, use `.with_openvino_device_type("GPU")` in Rust or
-`openvinoDeviceType: 'GPU'` in TypeScript.
+For Intel OpenVINO, use `DeviceProvider::IntelGpu` or
+`DeviceProvider::IntelNpu` in Rust, and `provider: 'intel_gpu'` or
+`provider: 'intel_npu'` in TypeScript. Add an optional `device: '0'` (or
+`'GPU.0'`/`'NPU.0'`) when a specific device is required. The legacy
+`.with_openvino_device_type("GPU")` and `openvinoDeviceType: 'GPU'` forms are
+still supported.
 
-Call `probeInferenceBackends()` to inspect providers in the loaded runtime.
+Call `probeInferenceBackends({ provider: 'intel_npu' })` to inspect providers
+using a programmatic device policy, or call it without arguments for the
+current worker configuration.
 Configuration is process-wide because ONNX Runtime and its provider libraries
 are process-wide; `configureInference` is the startup default, while
 `inferenceOptions` selects among providers available in that loaded runtime.
@@ -433,9 +478,9 @@ send each request to the appropriate worker.
 `DGHS_BACKEND=amd-gpu`, `amd-npu`, and `cpu` are strict selections. Provider
 initialization, model support, and compilation failures are returned as
 `BackendUnavailable`, `ModelUnsupported`, or `CompilationFailed`; an explicit
-AMD worker never silently falls back to CPU. The legacy `auto` setting remains
-available for compatibility and retains the existing automatic provider
-policy.
+AMD worker never silently falls back to CPU. The `auto` setting remains
+available for compatibility and validates each provider candidate by creating
+the requested model session before selecting it; CPU is the final fallback.
 
 The `amd-gpu` feature enables the [ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html).
 The [Radeon 8060S](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html)
@@ -601,12 +646,14 @@ uv pip install --target .ort-runtime \
 export ORT_DYLIB_PATH="$PWD/.ort-runtime/onnxruntime/capi/libonnxruntime.so.1.24.1"
 ```
 
-For a system OpenVINO installation, source its environment setup script before
-starting the worker. This is required for native applications that use the
-OpenVINO runtime libraries:
+For a system OpenVINO installation, the library can resolve the standard
+runtime libraries itself. Source the vendor setup script only when it is needed
+to configure the driver/ICD environment, or point the library at a custom
+runtime directory:
 
 ```bash
 source /opt/intel/openvino/setupvars.sh
+export DGHS_OPENVINO_LIBRARY_PATH=/opt/intel/openvino/runtime/lib/intel64
 cargo build --release --features openvino
 ```
 
@@ -616,12 +663,24 @@ Select the device when starting the application. `NPU` selects the Intel NPU and
 # Intel NPU
 export DGHS_ORT_DEVICE=NPU
 
-# Intel XPU/GPU. Select the Intel OpenCL ICD on Linux.
+# Intel XPU/GPU. The library selects the Intel OpenCL ICD automatically when
+# OCL_ICD_VENDORS is not already set.
 export DGHS_ORT_DEVICE=GPU
-export OCL_ICD_VENDORS=/etc/OpenCL/vendors/
+# Optional override:
+# export OCL_ICD_VENDORS=/etc/OpenCL/vendors/intel.icd
 ```
 
-When unset, the library uses `AUTO:NPU,GPU,CPU` and tries NPU, then GPU, then CPU. Set `ORT_DYLIB_PATH` and the device variables in the process that runs the application. GPU execution on Linux requires the Intel GPU driver and the ICD files in `/etc/OpenCL/vendors/`.
+When unset, the library inspects the Intel devices exposed by the host and
+builds an OpenVINO policy such as `AUTO:NPU,GPU,CPU`, `AUTO:GPU,CPU`, or
+`AUTO:CPU`. The actual model session is then created for each automatic
+candidate; CPU is the final fallback. Set `ORT_DYLIB_PATH` and the device
+variables in the process that runs the application. GPU execution on Linux
+requires the Intel GPU driver and an Intel ICD file. NPU execution also
+requires access to the `/dev/accel/*` node (normally membership in the
+`render` group). If
+`/etc/OpenCL/vendors/intel.icd` (or the standard
+`/usr/share/OpenCL/vendors/intel.icd`) exists, the library selects it before
+OpenVINO initializes. An existing `OCL_ICD_VENDORS` value is preserved.
 
 For a strict provider selection, set the crate backend as well:
 
@@ -644,9 +703,15 @@ npm run build
 Use the included minimal probe to verify session creation:
 
 ```bash
-cargo run --no-default-features --example intel_ep_probe -- \
-  .ort-runtime/onnxruntime/datasets/sigmoid.onnx
+cargo run --no-default-features --features openvino --example intel_ep_probe -- --run \
+  --provider intel_npu --device 0 .ort-runtime/onnxruntime/datasets/sigmoid.onnx
 ```
+
+An explicit `provider` is strict: if that device cannot initialize or the model
+cannot be committed, the library returns an error instead of hiding the failure
+behind CPU fallback. The automatic policy is the mode that may fall back to
+CPU. The probe with `--run` validates both session creation and a real
+inference call; use `ep_probe` for a provider capability diagnostic.
 
 The `onnxruntime-openvino` shared libraries come from the [official ONNX Runtime OpenVINO Execution Provider distribution](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html). Keep the files from the same `capi` directory together and do not mix them with a different OpenVINO installation.
 
