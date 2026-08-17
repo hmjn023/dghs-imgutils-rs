@@ -421,6 +421,13 @@ configureInference({ provider: 'cuda', device: '1' });
 console.log(getInferenceConfiguration());
 ```
 
+When automatic Intel GPU/NPU selection is used on Linux, call the Rust
+`init_onnx_runtime()` function or `configureInference(...)` during
+single-threaded application startup, before creating inference worker threads.
+This lets the library prepare the OpenVINO dependencies and Intel OpenCL ICD
+before ONNX Runtime loads its provider; an existing `OCL_ICD_VENDORS` or
+`OCL_ICD_FILENAMES` policy is always preserved.
+
 `provider` is one of `cpu`, `cuda`, `tensorrt`, `directml`, `intel_gpu`,
 `intel_npu`, `amd_gpu`, `amd_npu`, or `openvino`. `device` is optional: CUDA,
 TensorRT, AMD GPU, and DirectML accept an ordinal string such as `"1"`; Intel
@@ -680,7 +687,8 @@ requires access to the `/dev/accel/*` node (normally membership in the
 `render` group). If
 `/etc/OpenCL/vendors/intel.icd` (or the standard
 `/usr/share/OpenCL/vendors/intel.icd`) exists, the library selects it before
-OpenVINO initializes. An existing `OCL_ICD_VENDORS` value is preserved.
+OpenVINO initializes during the startup initialization described above. An
+existing `OCL_ICD_VENDORS` or `OCL_ICD_FILENAMES` value is preserved.
 
 For a strict provider selection, set the crate backend as well:
 

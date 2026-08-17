@@ -17,6 +17,11 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// Prepares known provider dependencies before the first ONNX Runtime call.
+///
+/// On Linux, callers that rely on automatic Intel OpenCL ICD selection must
+/// run this during single-threaded application startup. The OpenCL loader has
+/// no provider-option API for an ICD path, so its process-wide startup policy
+/// must be established before worker threads or provider libraries are used.
 pub(crate) fn prepare() {
     #[cfg(any(feature = "cuda", feature = "openvino"))]
     {
@@ -114,22 +119,13 @@ pub(crate) fn detected_intel_device_summary() -> String {
 }
 
 #[cfg(target_os = "linux")]
+/// Reports whether an accessible Intel DRM render node is available.
 fn has_intel_drm_device() -> bool {
-    let Ok(entries) = fs::read_dir("/sys/class/drm") else {
-        return false;
-    };
-
-    entries.flatten().any(|entry| {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        name.starts_with("card")
-            && !name.contains('-')
-            && is_intel_pci_device(&entry.path().join("device"))
-            && has_accessible_intel_render_node()
-    })
+    has_accessible_intel_render_node()
 }
 
 #[cfg(target_os = "linux")]
+/// Reports whether an accessible Intel accelerator node is exposed by sysfs.
 fn has_intel_accelerator_device() -> bool {
     let Ok(entries) = fs::read_dir("/sys/class/accel") else {
         return false;
@@ -145,6 +141,7 @@ fn has_intel_accelerator_device() -> bool {
 }
 
 #[cfg(target_os = "linux")]
+/// Finds an Intel DRM render node that the current process can open read/write.
 fn has_accessible_intel_render_node() -> bool {
     let Ok(entries) = fs::read_dir("/sys/class/drm") else {
         return false;
@@ -160,11 +157,14 @@ fn has_accessible_intel_render_node() -> bool {
 }
 
 #[cfg(target_os = "linux")]
+/// Checks the read/write access required by the provider runtime for a device
+/// node.
 fn is_device_node_accessible(path: &Path) -> bool {
     OpenOptions::new().read(true).write(true).open(path).is_ok()
 }
 
 #[cfg(target_os = "linux")]
+/// Checks the Linux PCI vendor identifier for Intel (`0x8086`).
 fn is_intel_pci_device(device_path: &Path) -> bool {
     fs::read_to_string(device_path.join("vendor"))
         .map(|vendor| vendor.trim().eq_ignore_ascii_case("0x8086"))
@@ -258,7 +258,7 @@ fn prepare_platform() {
 }
 
 #[cfg(all(target_os = "linux", feature = "openvino"))]
-/// Preloads the OpenVINO core and selects the Intel OpenCL ICD when needed.
+/// Preloads the OpenVINO core libraries needed by the execution provider.
 fn prepare_linux_openvino() {
     configure_intel_opencl_icd();
     prepare_linux_libraries(
@@ -273,6 +273,43 @@ fn prepare_linux_openvino() {
     // change private symbol resolution and abort the process when a GPU/NPU
     // plugin initializes.
 }
+
+#[cfg(all(target_os = "linux", feature = "openvino", not(test)))]
+/// Selects Intel's standard OpenCL ICD during the documented single-threaded
+/// startup phase while preserving an application-provided loader policy.
+fn configure_intel_opencl_icd() {
+    use tracing::info;
+
+    // Respect an application/container policy when it has already selected an
+    // ICD. OCL_ICD_FILENAMES is also honored because the ocl-icd loader gives
+    // it precedence over the vendor directory scan.
+    if env::var_os("OCL_ICD_VENDORS").is_some()
+        || env::var_os("OCL_ICD_FILENAMES").is_some()
+        || !has_accessible_intel_render_node()
+    {
+        return;
+    }
+
+    for path in [
+        "/etc/OpenCL/vendors/intel.icd",
+        "/usr/share/OpenCL/vendors/intel.icd",
+    ] {
+        let path = Path::new(path);
+        if path.is_file() {
+            // SAFETY: `prepare` is the process startup initialization hook and
+            // runs once before ONNX Runtime/provider loading. Applications
+            // must call `init_onnx_runtime` or `configure_inference` before
+            // starting worker threads when relying on this automatic ICD
+            // selection. Existing loader policy is preserved above.
+            unsafe { env::set_var("OCL_ICD_VENDORS", path) };
+            info!(path = %path.display(), "[ort] selected Intel OpenCL ICD");
+            break;
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "openvino", test))]
+fn configure_intel_opencl_icd() {}
 
 #[cfg(all(target_os = "linux", feature = "openvino"))]
 /// Makes Intel's Level Zero libraries discoverable by the OpenVINO NPU plugin.
@@ -331,34 +368,6 @@ fn prepare_linux_npu_dependencies() {
     });
 }
 
-#[cfg(all(target_os = "linux", feature = "openvino"))]
-fn configure_intel_opencl_icd() {
-    use tracing::info;
-
-    // Respect an application/container policy when it has already selected an
-    // ICD.  Otherwise the generic OpenCL loader can enumerate Mesa Rusticl
-    // before Intel's ICD; on some hosts that causes the Intel OpenVINO GPU
-    // plugin to compile through the wrong implementation and crash in LLVM.
-    if env::var_os("OCL_ICD_VENDORS").is_some() || !has_accessible_intel_render_node() {
-        return;
-    }
-
-    for path in [
-        "/etc/OpenCL/vendors/intel.icd",
-        "/usr/share/OpenCL/vendors/intel.icd",
-    ] {
-        let path = Path::new(path);
-        if path.is_file() {
-            // SAFETY: this is process-wide initialization performed once
-            // before ONNX Runtime/OpenCL is first used.  Existing user
-            // configuration is preserved above.
-            unsafe { env::set_var("OCL_ICD_VENDORS", path) };
-            info!(path = %path.display(), "[ort] selected Intel OpenCL ICD");
-            break;
-        }
-    }
-}
-
 /// Rejects strict Intel device policies that the current process cannot open.
 ///
 /// Sysfs presence alone is not enough: Linux commonly exposes `/dev/accel/*`
@@ -406,6 +415,8 @@ pub(crate) fn validate_openvino_device_policy(device_type: &str) -> Result<(), S
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Preloads known provider libraries from the runtime search path so ORT can
+/// resolve them even when the host linker path does not include their folder.
 fn prepare_linux_libraries(label: &str, exact_names: &[&str], prefixes: &[&str]) {
     use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_LAZY};
     use std::collections::HashSet;
@@ -451,6 +462,8 @@ fn prepare_linux_libraries(label: &str, exact_names: &[&str], prefixes: &[&str])
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Finds an exact library or the newest versioned library in the configured
+/// runtime directories.
 fn find_library(name: &str, prefixes: &[&str]) -> Option<PathBuf> {
     let directories = runtime_search_directories();
 
@@ -469,7 +482,7 @@ fn find_library(name: &str, prefixes: &[&str]) -> Option<PathBuf> {
             let Ok(entries) = fs::read_dir(directory) else {
                 continue;
             };
-            let mut matches = entries
+            let matches = entries
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| {
@@ -478,8 +491,7 @@ fn find_library(name: &str, prefixes: &[&str]) -> Option<PathBuf> {
                         .is_some_and(|file| file.starts_with(prefix))
                 })
                 .collect::<Vec<_>>();
-            matches.sort();
-            if let Some(path) = matches.into_iter().next() {
+            if let Some(path) = select_highest_versioned_library(matches, prefix) {
                 return Some(path);
             }
         }
@@ -489,6 +501,28 @@ fn find_library(name: &str, prefixes: &[&str]) -> Option<PathBuf> {
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Selects the highest numeric SONAME suffix rather than relying on
+/// lexicographic path ordering (`.12` must win over `.9`).
+fn select_highest_versioned_library(mut matches: Vec<PathBuf>, prefix: &str) -> Option<PathBuf> {
+    matches.sort_by_key(|path| {
+        let version = path
+            .file_name()
+            .and_then(|file| file.to_str())
+            .and_then(|file| file.strip_prefix(prefix))
+            .map(|suffix| {
+                suffix
+                    .split('.')
+                    .map_while(|component| component.parse::<u64>().ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (version, path.clone())
+    });
+    matches.into_iter().next_back()
+}
+
+#[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Returns the library-family prefixes that match an exact library name.
 fn matching_prefixes<'a>(name: &str, prefixes: &'a [&str]) -> impl Iterator<Item = &'a str> {
     prefixes
         .iter()
@@ -497,6 +531,7 @@ fn matching_prefixes<'a>(name: &str, prefixes: &'a [&str]) -> impl Iterator<Item
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Builds the ordered library search path used by provider preparation.
 fn runtime_search_directories() -> Vec<PathBuf> {
     let mut directories = Vec::new();
 
@@ -539,6 +574,7 @@ fn runtime_search_directories() -> Vec<PathBuf> {
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Appends existing directories referenced by a path-list environment value.
 fn append_env_paths(directories: &mut Vec<PathBuf>, variable: &str) {
     let Some(value) = env::var_os(variable) else {
         return;
@@ -558,6 +594,7 @@ fn append_env_paths(directories: &mut Vec<PathBuf>, variable: &str) {
 }
 
 #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+/// Adds a directory once while preserving search priority.
 fn push_unique(directories: &mut Vec<PathBuf>, path: PathBuf) {
     if !directories.iter().any(|existing| existing == &path) {
         directories.push(path);
@@ -598,6 +635,21 @@ mod tests {
             matching_prefixes("libopenvino_c.so", &prefixes).collect::<Vec<_>>(),
             vec!["libopenvino_c.so."]
         );
+    }
+
+    #[cfg(all(target_os = "linux", any(feature = "cuda", feature = "openvino")))]
+    #[test]
+    fn newest_library_version_wins_numeric_order() {
+        let selected = select_highest_versioned_library(
+            vec![
+                PathBuf::from("/tmp/libcudart.so.9"),
+                PathBuf::from("/tmp/libcudart.so.12"),
+                PathBuf::from("/tmp/libcudart.so.11"),
+            ],
+            "libcudart.so.",
+        );
+
+        assert_eq!(selected, Some(PathBuf::from("/tmp/libcudart.so.12")));
     }
 
     #[test]

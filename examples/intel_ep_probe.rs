@@ -35,6 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model_path = model_path.ok_or(
         "usage: cargo run --example intel_ep_probe -- [--run] [--provider intel_gpu|intel_npu] [--device 0|GPU.0] <model.onnx>",
     )?;
+    if provider.is_none() && device.is_some() {
+        return Err("--device requires --provider".into());
+    }
     let options = if let Some(provider) = provider {
         SessionOptions::for_device(DeviceSelection { provider, device })?
     } else {
@@ -55,6 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Runs one all-ones FP32 tensor through the first model input and prints the
+/// first output value as a minimal end-to-end provider check.
 fn run_single_fp32_probe(
     session: &mut ort::session::Session,
 ) -> Result<(), Box<dyn std::error::Error>> {

@@ -35,6 +35,7 @@ pub enum NapiInferenceProvider {
     OpenVino,
 }
 
+/// Converts the JavaScript-facing provider enum to the Rust selector.
 impl From<NapiInferenceProvider> for DeviceProvider {
     fn from(provider: NapiInferenceProvider) -> Self {
         match provider {
@@ -240,6 +241,8 @@ fn configuration_from(options: SessionOptions) -> NapiInferenceConfiguration {
     }
 }
 
+/// Converts the effective Rust options back to the public provider/device
+/// representation returned by the N-API configuration query.
 fn provider_configuration(
     options: &SessionOptions,
 ) -> (Option<NapiInferenceProvider>, Option<String>) {
@@ -280,10 +283,12 @@ fn provider_configuration(
     }
 }
 
+/// Returns the explicit ordinal when the effective provider uses one.
 fn ordinal_device(options: &SessionOptions) -> Option<String> {
     (options.device_id != 0).then(|| options.device_id.to_string())
 }
 
+/// Extracts the ordinal portion from an OpenVINO `GPU.N`/`NPU.N` policy.
 fn openvino_ordinal(suffix: &str) -> Option<String> {
     suffix.strip_prefix('.').map(str::to_owned)
 }

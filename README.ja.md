@@ -405,6 +405,11 @@ configureInference({ provider: 'cuda', device: '1' });
 console.log(getInferenceConfiguration());
 ```
 
+LinuxでIntel GPU/NPUの自動選択を使う場合は、Rustの`init_onnx_runtime()`または
+`configureInference(...)`をworker thread作成前のsingle-threadedな起動処理で呼び出してください。
+OpenVINO/providerのロード前に依存関係とIntel OpenCL ICDを準備します。既存の
+`OCL_ICD_VENDORS`または`OCL_ICD_FILENAMES`設定は維持されます。
+
 `provider`には`cpu`、`cuda`、`tensorrt`、`directml`、`intel_gpu`、`intel_npu`、
 `amd_gpu`、`amd_npu`、`openvino`を指定できます。`device`は任意で、CUDA、TensorRT、
 AMD GPU、DirectMLでは`"1"`のようなordinal、Intelでは`"0"`、`"GPU.0"`、`"NPU.0"`を
@@ -645,7 +650,8 @@ export DGHS_ORT_DEVICE=GPU
 環境では、Intel GPU driverとIntel ICD fileが必要です。NPU実行には`/dev/accel/*`（通常は
 `render` group）へのアクセス権も必要です。`OCL_ICD_VENDORS`が未設定で、
 `/etc/OpenCL/vendors/intel.icd`（または標準の`/usr/share/OpenCL/vendors/intel.icd`）が存在する
-場合は、OpenVINO初期化前にlibraryが自動選択します。既存の`OCL_ICD_VENDORS`設定は維持します。
+場合は、上記の起動初期化時にOpenVINO初期化前のlibraryが自動選択します。既存の
+`OCL_ICD_VENDORS`または`OCL_ICD_FILENAMES`設定は維持します。
 
 strictにproviderを選択する場合はbackendも指定します。
 

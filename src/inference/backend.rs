@@ -125,6 +125,8 @@ impl DeviceProvider {
         }
     }
 
+    /// Maps the public provider selector to the concrete backend
+    /// implementation used by the session builder.
     const fn backend(self) -> Backend {
         match self {
             Self::Auto => Backend::Auto,
@@ -155,8 +157,8 @@ impl FromStr for DeviceProvider {
             "cuda" => Ok(Self::Cuda),
             "tensorrt" | "tensor-rt" => Ok(Self::TensorRt),
             "directml" | "direct-ml" => Ok(Self::DirectMl),
-            "intel_gpu" | "intel-gpu" | "intel" | "gpu" => Ok(Self::IntelGpu),
-            "intel_npu" | "intel-npu" | "npu" => Ok(Self::IntelNpu),
+            "intel_gpu" | "intel-gpu" | "intel" => Ok(Self::IntelGpu),
+            "intel_npu" | "intel-npu" => Ok(Self::IntelNpu),
             "amd_gpu" | "amd-gpu" | "migraphx" => Ok(Self::AmdGpu),
             "amd_npu" | "amd-npu" | "vitis" | "vitis-ai" => Ok(Self::AmdNpu),
             "openvino" | "open-vino" => Ok(Self::OpenVino),
@@ -260,6 +262,8 @@ impl DeviceSelection {
     }
 }
 
+/// Parses a numeric device ordinal for providers that expose CUDA-style
+/// device indexes.
 fn parse_device_ordinal(
     provider: DeviceProvider,
     device: Option<&str>,
@@ -275,6 +279,8 @@ fn parse_device_ordinal(
     })
 }
 
+/// Converts a public Intel device selector into OpenVINO's device policy
+/// spelling, preserving the provider-specific `GPU`/`NPU` prefix.
 fn intel_openvino_device(
     provider_device: &str,
     device: Option<&str>,
@@ -1020,6 +1026,8 @@ mod tests {
             "intel_gpu".parse::<DeviceProvider>(),
             Ok(DeviceProvider::IntelGpu)
         );
+        assert!("gpu".parse::<DeviceProvider>().is_err());
+        assert!("npu".parse::<DeviceProvider>().is_err());
         assert_eq!(
             "amd-npu".parse::<DeviceProvider>(),
             Ok(DeviceProvider::AmdNpu)

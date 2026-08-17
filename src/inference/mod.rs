@@ -102,6 +102,13 @@ pub fn configure_inference(options: SessionOptions) -> Result<(), InferenceError
         ));
     }
 
+    // Prepare OpenVINO/ICD dependencies while the application is still in its
+    // startup configuration phase. This keeps provider loading deterministic
+    // for callers that configure the worker before spawning inference threads.
+    if matches!(options.backend, Backend::Auto | Backend::OpenVino) {
+        init_onnx_runtime()?;
+    }
+
     *PROGRAMMATIC_SESSION_OPTIONS.write().map_err(|error| {
         InferenceError::Initialization(format!("Inference options lock poisoned: {error}"))
     })? = Some(options);
@@ -174,6 +181,9 @@ pub fn with_inference_options<T>(options: SessionOptions, operation: impl FnOnce
 /// ONNX Runtime のグローバル環境を初期化します。
 ///
 /// `ort` クレートはセッションの初回作成時に自動で初期化を行うため、この関数の呼び出しは通常任意です。
+/// Intel GPU を自動選択する Linux アプリケーションでは、worker thread を起動する前の
+/// single-threaded な起動処理で呼び出してください。N-API の `configureInference` は
+/// Intel/OpenVINO 選択時にこの初期化を自動で行います。
 pub fn init_onnx_runtime() -> Result<(), InferenceError> {
     runtime::prepare();
     Ok(())
@@ -208,17 +218,25 @@ fn create_onnx_session_from_key(
     options: &SessionOptions,
 ) -> Result<Session, InferenceError> {
     init_onnx_runtime()?;
-    INFERENCE_INITIALIZED.store(true, Ordering::Release);
 
-    match options.backend {
+    let session = match options.backend {
         Backend::Auto => {
             validate_provider_precision(Backend::Auto, options.precision)?;
             create_automatic_session(key, options)
         }
         _ => create_session_for_backend(key, options),
-    }
+    }?;
+
+    // A failed provider/session attempt must not permanently lock the worker
+    // configuration. Mark the process initialized only after a usable session
+    // has been committed.
+    INFERENCE_INITIALIZED.store(true, Ordering::Release);
+    Ok(session)
 }
 
+/// Tries the configured provider order and returns the first session that can
+/// be committed. Non-CPU failures are retained so an all-provider failure
+/// reports a useful accelerator error instead of only the CPU fallback error.
 fn create_automatic_session(
     key: &SessionKey,
     options: &SessionOptions,
@@ -266,6 +284,8 @@ fn create_automatic_session(
     }))
 }
 
+/// Builds the provider order used by automatic selection for the current
+/// feature set and worker options.
 fn automatic_backend_order(_options: &SessionOptions) -> Vec<Backend> {
     #[cfg(feature = "openvino")]
     let device_type = _options
@@ -300,6 +320,7 @@ fn automatic_backend_order(_options: &SessionOptions) -> Vec<Backend> {
     backends
 }
 
+/// Creates a session using one concrete backend configuration.
 fn create_session_for_backend(
     key: &SessionKey,
     options: &SessionOptions,
@@ -313,6 +334,7 @@ fn create_session_for_backend(
         .map_err(|error| classify_session_error(options.backend, error.to_string()))
 }
 
+/// Applies backend-specific execution-provider options to a session builder.
 fn configure_session_builder(
     builder: &mut ort::session::builder::SessionBuilder,
     key: &SessionKey,
