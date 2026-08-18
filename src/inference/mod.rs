@@ -3,12 +3,14 @@
 pub mod backend;
 pub mod classify;
 pub mod error;
+mod runtime;
 pub mod session;
 pub mod yolo;
 
 pub use backend::{
-    Backend, BackendCapabilities, ModelManifest, ModelProfile, Precision, SessionOptions,
-    choose_backend, probe_backend, probe_backends,
+    Backend, BackendCapabilities, DeviceProvider, DeviceSelection, ModelManifest, ModelProfile,
+    Precision, SessionOptions, choose_backend, probe_backend, probe_backend_with_options,
+    probe_backends, probe_backends_with_options,
 };
 pub use error::InferenceError;
 pub use session::{SessionKey, model_sha256, runtime_fingerprint};
@@ -26,13 +28,12 @@ use std::env;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::{info, warn};
+use tracing::{debug, info};
 
 /// Shared, worker-local session handle used by all model modules.
 pub type SharedSession = Arc<Mutex<Session>>;
 
 const OPENVINO_DEVICE_ENV: &str = "DGHS_ORT_DEVICE";
-const DEFAULT_OPENVINO_DEVICE: &str = "AUTO:NPU,GPU,CPU";
 
 /// Returns the effective OpenVINO device policy for the current process.
 ///
@@ -41,27 +42,18 @@ pub fn openvino_device_type() -> String {
     env::var(OPENVINO_DEVICE_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_OPENVINO_DEVICE.to_owned())
+        .unwrap_or_else(runtime::default_openvino_device)
 }
 
+#[cfg(any(feature = "openvino", test))]
 fn is_explicit_openvino_device(device_type: &str) -> bool {
-    matches!(
-        device_type.trim().to_ascii_uppercase().as_str(),
-        "CPU" | "GPU" | "NPU"
-    )
-}
-
-fn provider_registration_error<E: std::fmt::Display>(
-    error: E,
-    explicit_device: bool,
-) -> Result<(), InferenceError> {
-    if explicit_device {
-        Err(InferenceError::Initialization(format!(
-            "Failed to register execution providers: {error}"
-        )))
-    } else {
-        Ok(())
-    }
+    let device_type = device_type.trim().to_ascii_uppercase();
+    matches!(device_type.as_str(), "CPU" | "GPU" | "NPU")
+        || device_type.starts_with("CPU.")
+        || device_type.starts_with("GPU.")
+        || device_type.starts_with("NPU.")
+        || device_type.starts_with("HETERO:")
+        || device_type.starts_with("MULTI:")
 }
 
 /// ONNX セッションの worker-local cache.
@@ -108,6 +100,13 @@ pub fn configure_inference(options: SessionOptions) -> Result<(), InferenceError
             "inference is already initialized; configure the worker before the first model call"
                 .to_owned(),
         ));
+    }
+
+    // Prepare OpenVINO/ICD dependencies while the application is still in its
+    // startup configuration phase. This keeps provider loading deterministic
+    // for callers that configure the worker before spawning inference threads.
+    if matches!(options.backend, Backend::Auto | Backend::OpenVino) {
+        init_onnx_runtime()?;
     }
 
     *PROGRAMMATIC_SESSION_OPTIONS.write().map_err(|error| {
@@ -182,8 +181,11 @@ pub fn with_inference_options<T>(options: SessionOptions, operation: impl FnOnce
 /// ONNX Runtime のグローバル環境を初期化します。
 ///
 /// `ort` クレートはセッションの初回作成時に自動で初期化を行うため、この関数の呼び出しは通常任意です。
+/// Intel GPU を自動選択する Linux アプリケーションでは、worker thread を起動する前の
+/// single-threaded な起動処理で呼び出してください。N-API の `configureInference` は
+/// Intel/OpenVINO 選択時にこの初期化を自動で行います。
 pub fn init_onnx_runtime() -> Result<(), InferenceError> {
-    // 将来的な環境のカスタマイズ用のプレースホルダ
+    runtime::prepare();
     Ok(())
 }
 
@@ -206,6 +208,7 @@ pub fn create_onnx_session_with_options<P: AsRef<Path>>(
     model_path: P,
     options: &SessionOptions,
 ) -> Result<Session, InferenceError> {
+    init_onnx_runtime()?;
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
     create_onnx_session_from_key(&key, options)
 }
@@ -214,28 +217,141 @@ fn create_onnx_session_from_key(
     key: &SessionKey,
     options: &SessionOptions,
 ) -> Result<Session, InferenceError> {
-    INFERENCE_INITIALIZED.store(true, Ordering::Release);
+    init_onnx_runtime()?;
 
-    let mut builder =
-        Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
-
-    match options.backend {
+    let session = match options.backend {
         Backend::Auto => {
             validate_provider_precision(Backend::Auto, options.precision)?;
-            configure_automatic_providers(&mut builder, options)?;
+            create_automatic_session(key, options)
         }
-        Backend::Cpu => validate_provider_precision(Backend::Cpu, options.precision)?,
-        Backend::AmdGpu => configure_amd_gpu(&mut builder, options)?,
-        Backend::AmdNpu => configure_amd_npu(&mut builder, options, key)?,
-        Backend::Cuda => configure_cuda(&mut builder, options)?,
-        Backend::TensorRt => configure_tensorrt(&mut builder, options)?,
-        Backend::DirectMl => configure_directml(&mut builder, options)?,
-        Backend::OpenVino => configure_openvino(&mut builder, options)?,
+        _ => create_session_for_backend(key, options),
+    }?;
+
+    // A failed provider/session attempt must not permanently lock the worker
+    // configuration. Mark the process initialized only after a usable session
+    // has been committed.
+    INFERENCE_INITIALIZED.store(true, Ordering::Release);
+    Ok(session)
+}
+
+/// Tries the configured provider order and returns the first session that can
+/// be committed. Non-CPU failures are retained so an all-provider failure
+/// reports a useful accelerator error instead of only the CPU fallback error.
+fn create_automatic_session(
+    key: &SessionKey,
+    options: &SessionOptions,
+) -> Result<Session, InferenceError> {
+    let backends = automatic_backend_order(options);
+    let mut last_error = None;
+    let mut first_non_cpu_error = None;
+
+    for backend in backends {
+        let candidate_options = options.clone().with_backend(backend);
+        // Keep the public cache identity tied to the caller's `auto` request,
+        // but give provider-specific compiler/cache setup the concrete
+        // candidate identity.
+        let candidate_key = SessionKey {
+            model_path: key.model_path.clone(),
+            model_sha256: key.model_sha256.clone(),
+            backend,
+            precision: candidate_options.precision,
+            device_id: candidate_options.device_id,
+            runtime_fingerprint: key.runtime_fingerprint.clone(),
+            provider_fingerprint: candidate_options.provider_fingerprint(),
+        };
+        match create_session_for_backend(&candidate_key, &candidate_options) {
+            Ok(session) => {
+                info!(backend = %backend, "[ort] automatic backend selected");
+                return Ok(session);
+            }
+            Err(error) => {
+                debug!(
+                    backend = %backend,
+                    error = %error,
+                    "[ort] automatic backend unavailable"
+                );
+                if backend != Backend::Cpu && first_non_cpu_error.is_none() {
+                    first_non_cpu_error = Some(error);
+                } else {
+                    last_error = Some(error);
+                }
+            }
+        }
     }
+
+    Err(first_non_cpu_error.or(last_error).unwrap_or_else(|| {
+        InferenceError::Initialization("no automatic inference backend is available".to_owned())
+    }))
+}
+
+/// Builds the provider order used by automatic selection for the current
+/// feature set and worker options.
+fn automatic_backend_order(_options: &SessionOptions) -> Vec<Backend> {
+    #[cfg(feature = "openvino")]
+    let device_type = _options
+        .openvino_device_type
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(openvino_device_type);
+
+    // An explicit OpenVINO device is a strict request even when the public
+    // backend remains `auto`, preserving the DGHS_ORT_DEVICE contract.
+    #[cfg(feature = "openvino")]
+    if is_explicit_openvino_device(&device_type) {
+        return vec![Backend::OpenVino];
+    }
+
+    let mut backends = Vec::with_capacity(6);
+    #[cfg(feature = "tensorrt")]
+    backends.push(Backend::TensorRt);
+    #[cfg(feature = "cuda")]
+    backends.push(Backend::Cuda);
+    #[cfg(feature = "directml")]
+    backends.push(Backend::DirectMl);
+    #[cfg(feature = "openvino")]
+    backends.push(Backend::OpenVino);
+    #[cfg(feature = "amd-gpu")]
+    backends.push(Backend::AmdGpu);
+    #[cfg(feature = "amd-npu")]
+    if _options.vitis_config_file.is_some() {
+        backends.push(Backend::AmdNpu);
+    }
+    backends.push(Backend::Cpu);
+    backends
+}
+
+/// Creates a session using one concrete backend configuration.
+fn create_session_for_backend(
+    key: &SessionKey,
+    options: &SessionOptions,
+) -> Result<Session, InferenceError> {
+    let mut builder =
+        Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    configure_session_builder(&mut builder, key, options)?;
 
     builder
         .commit_from_file(&key.model_path)
         .map_err(|error| classify_session_error(options.backend, error.to_string()))
+}
+
+/// Applies backend-specific execution-provider options to a session builder.
+fn configure_session_builder(
+    builder: &mut ort::session::builder::SessionBuilder,
+    key: &SessionKey,
+    options: &SessionOptions,
+) -> Result<(), InferenceError> {
+    match options.backend {
+        Backend::Auto => Err(InferenceError::InvalidInput(
+            "automatic backend must be resolved before configuring a session".to_owned(),
+        )),
+        Backend::Cpu => validate_provider_precision(Backend::Cpu, options.precision),
+        Backend::AmdGpu => configure_amd_gpu(builder, options),
+        Backend::AmdNpu => configure_amd_npu(builder, options, key),
+        Backend::Cuda => configure_cuda(builder, options),
+        Backend::TensorRt => configure_tensorrt(builder, options),
+        Backend::DirectMl => configure_directml(builder, options),
+        Backend::OpenVino => configure_openvino(builder, options),
+    }
 }
 
 /// Creates a session after validating model deployment metadata.
@@ -275,116 +391,6 @@ fn validate_manifest(
         effective_options.vitis_config_file = manifest.compiler_config.clone();
     }
     Ok(effective_options)
-}
-
-fn configure_automatic_providers(
-    builder: &mut ort::session::builder::SessionBuilder,
-    options: &SessionOptions,
-) -> Result<(), InferenceError> {
-    use ort::ep::{CUDA, DirectML, OpenVINO, TensorRT};
-
-    let mut providers: Vec<ExecutionProviderDispatch> = Vec::new();
-
-    let device_type = options
-        .openvino_device_type
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(openvino_device_type);
-    let explicit_openvino_device = is_explicit_openvino_device(&device_type);
-
-    // Register an explicitly requested OpenVINO device first so that it has
-    // priority over other available execution providers.
-    let openvino = OpenVINO::default().with_device_type(&device_type);
-    let mut openvino_provider = match openvino.is_available() {
-        Ok(true) => {
-            info!("[ort] OpenVINO EP is available! Enabling device type {device_type}.");
-            Some(openvino.build().error_on_failure())
-        }
-        Ok(false) if explicit_openvino_device => {
-            return Err(InferenceError::Initialization(format!(
-                "OpenVINO EP is unavailable for requested device {device_type}"
-            )));
-        }
-        Ok(false) => None,
-        Err(e) if explicit_openvino_device => {
-            return Err(InferenceError::Initialization(format!(
-                "OpenVINO EP availability check failed for requested device {device_type}: {e}"
-            )));
-        }
-        Err(e) => {
-            warn!("[ort] OpenVINO EP check error: {:?}", e);
-            None
-        }
-    };
-
-    if explicit_openvino_device && let Some(provider) = openvino_provider.take() {
-        providers.push(provider);
-    }
-
-    // 1. TensorRT (NVIDIA 高性能 GPU)
-    let trt = TensorRT::default();
-    match trt.is_available() {
-        Ok(true) => {
-            info!("[ort] TensorRT EP is available! Enabling TRT.");
-            providers.push(trt.build());
-        }
-        Ok(false) => {}
-        Err(e) => {
-            warn!("[ort] TensorRT EP check error: {:?}", e);
-        }
-    }
-
-    // 2. CUDA (NVIDIA 標準 GPU)
-    let cuda = CUDA::default();
-    match cuda.is_available() {
-        Ok(true) => {
-            info!("[ort] CUDA EP is available! Enabling NVIDIA GPU acceleration.");
-            providers.push(cuda.build());
-        }
-        Ok(false) => {
-            info!("[ort] CUDA EP is not available (returned false).");
-        }
-        Err(e) => {
-            warn!("[ort] CUDA EP check error: {:?}", e);
-        }
-    }
-
-    // 3. DirectML (Windows NPU/GPU)
-    let dml = DirectML::default();
-    match dml.is_available() {
-        Ok(true) => {
-            info!("[ort] DirectML EP is available! Enabling DirectML.");
-            providers.push(dml.build());
-        }
-        Ok(false) => {}
-        Err(e) => {
-            warn!("[ort] DirectML EP check error: {:?}", e);
-        }
-    }
-
-    // 4. OpenVINO (Intel CPU/GPU/NPU), after the existing providers for the
-    // automatic policy. Explicit CPU/GPU/NPU requests were added above.
-    if !explicit_openvino_device && let Some(provider) = openvino_provider {
-        providers.push(provider);
-    }
-
-    if !providers.is_empty() {
-        match builder.clone().with_execution_providers(providers) {
-            Ok(b) => *builder = b,
-            Err(e) => {
-                if explicit_openvino_device {
-                    provider_registration_error(&e, true)?;
-                } else {
-                    warn!(
-                        "[ort] Failed to register execution providers, falling back to CPU: {:?}",
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn validate_provider_precision(
@@ -526,7 +532,8 @@ fn configure_cuda(
     #[cfg(feature = "cuda")]
     {
         validate_provider_precision(Backend::Cuda, options.precision)?;
-        register_strict_provider(builder, ort::ep::CUDA::default(), Backend::Cuda)
+        let provider = ort::ep::CUDA::default().with_device_id(options.device_id as i32);
+        register_strict_provider(builder, provider, Backend::Cuda)
     }
     #[cfg(not(feature = "cuda"))]
     {
@@ -544,7 +551,8 @@ fn configure_tensorrt(
     #[cfg(feature = "tensorrt")]
     {
         validate_provider_precision(Backend::TensorRt, options.precision)?;
-        register_strict_provider(builder, ort::ep::TensorRT::default(), Backend::TensorRt)
+        let provider = ort::ep::TensorRT::default().with_device_id(options.device_id as i32);
+        register_strict_provider(builder, provider, Backend::TensorRt)
     }
     #[cfg(not(feature = "tensorrt"))]
     {
@@ -562,7 +570,8 @@ fn configure_directml(
     #[cfg(feature = "directml")]
     {
         validate_provider_precision(Backend::DirectMl, options.precision)?;
-        register_strict_provider(builder, ort::ep::DirectML::default(), Backend::DirectMl)
+        let provider = ort::ep::DirectML::default().with_device_id(options.device_id as i32);
+        register_strict_provider(builder, provider, Backend::DirectMl)
     }
     #[cfg(not(feature = "directml"))]
     {
@@ -585,8 +594,19 @@ fn configure_openvino(
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(openvino_device_type);
+        runtime::validate_openvino_device_policy(&device_type).map_err(|reason| {
+            InferenceError::BackendUnavailable(format!(
+                "OpenVINO device policy {device_type} is unavailable: {reason}"
+            ))
+        })?;
+        runtime::prepare_openvino_device(&device_type);
         let provider = ort::ep::OpenVINO::default().with_device_type(&device_type);
-        register_strict_provider(builder, provider, Backend::OpenVino)
+        let detected_devices = runtime::detected_intel_device_summary();
+        register_strict_provider(builder, provider, Backend::OpenVino).map_err(|error| {
+            InferenceError::BackendUnavailable(format!(
+                "OpenVINO device policy {device_type} is unavailable (detected Intel devices: {detected_devices}): {error}"
+            ))
+        })
     }
     #[cfg(not(feature = "openvino"))]
     {
@@ -661,6 +681,7 @@ pub fn get_or_create_session_with_options<P: AsRef<Path>>(
     model_path: P,
     options: &SessionOptions,
 ) -> Result<Arc<Mutex<Session>>, InferenceError> {
+    init_onnx_runtime()?;
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
 
     {
@@ -807,7 +828,7 @@ mod tests {
         let _lock = DEVICE_ENV_LOCK.lock().unwrap();
         let _env = DeviceEnvGuard::set(None);
 
-        assert_eq!(openvino_device_type(), DEFAULT_OPENVINO_DEVICE);
+        assert_eq!(openvino_device_type(), runtime::default_openvino_device());
         assert!(!is_explicit_openvino_device(&openvino_device_type()));
     }
 
@@ -816,7 +837,7 @@ mod tests {
         let _lock = DEVICE_ENV_LOCK.lock().unwrap();
         let _env = DeviceEnvGuard::set(Some("  "));
 
-        assert_eq!(openvino_device_type(), DEFAULT_OPENVINO_DEVICE);
+        assert_eq!(openvino_device_type(), runtime::default_openvino_device());
         assert!(!is_explicit_openvino_device(&openvino_device_type()));
     }
 
@@ -830,21 +851,6 @@ mod tests {
     }
 
     #[test]
-    fn test_explicit_provider_registration_failure_is_propagated() {
-        let error = provider_registration_error("provider unavailable", true).unwrap_err();
-
-        assert!(matches!(
-            error,
-            InferenceError::Initialization(message) if message.contains("provider unavailable")
-        ));
-    }
-
-    #[test]
-    fn test_automatic_provider_registration_failure_allows_cpu_fallback() {
-        assert!(provider_registration_error("provider unavailable", false).is_ok());
-    }
-
-    #[test]
     fn non_migraphx_backends_reject_unapplied_precision_requests() {
         assert!(validate_provider_precision(Backend::Cuda, Precision::Fp32).is_ok());
         assert!(validate_provider_precision(Backend::Cpu, Precision::Auto).is_ok());
@@ -852,6 +858,25 @@ mod tests {
             validate_provider_precision(Backend::Cuda, Precision::Fp16),
             Err(InferenceError::ModelUnsupported(message)) if message.contains("fp16")
         ));
+    }
+
+    #[test]
+    fn automatic_backend_order_ends_with_cpu() {
+        let _lock = DEVICE_ENV_LOCK.lock().unwrap();
+        let _env = DeviceEnvGuard::set(None);
+
+        let order = automatic_backend_order(&SessionOptions::default());
+
+        assert_eq!(order.last(), Some(&Backend::Cpu));
+        assert!(!order.is_empty());
+    }
+
+    #[cfg(feature = "openvino")]
+    #[test]
+    fn explicit_openvino_device_keeps_auto_selection_strict() {
+        let options = SessionOptions::default().with_openvino_device_type("GPU.0");
+
+        assert_eq!(automatic_backend_order(&options), vec![Backend::OpenVino]);
     }
 
     #[test]

@@ -475,6 +475,7 @@ dependencies = [
  "hf-hub",
  "image",
  "imageproc",
+ "libloading 0.9.0",
  "lru",
  "napi",
  "napi-build",
