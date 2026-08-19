@@ -263,17 +263,23 @@ fn provider_configuration(
         Backend::OpenVino => {
             let device_type = options.openvino_device_type.as_deref().unwrap_or("AUTO");
             let normalized = device_type.to_ascii_uppercase();
-            if let Some(device) = normalized.strip_prefix("GPU") {
-                return (
-                    Some(NapiInferenceProvider::IntelGpu),
-                    openvino_ordinal(device),
-                );
-            }
-            if let Some(device) = normalized.strip_prefix("NPU") {
-                return (
-                    Some(NapiInferenceProvider::IntelNpu),
-                    openvino_ordinal(device),
-                );
+            let policy_devices = normalized
+                .strip_prefix("HETERO:")
+                .or_else(|| normalized.strip_prefix("MULTI:"));
+            let device_list = policy_devices.unwrap_or(&normalized);
+            if let Some(device) = device_list.split(',').next() {
+                if device == "NPU" || device.starts_with("NPU.") {
+                    return (
+                        Some(NapiInferenceProvider::IntelNpu),
+                        openvino_ordinal(device.strip_prefix("NPU").unwrap_or(device)),
+                    );
+                }
+                if device == "GPU" || device.starts_with("GPU.") {
+                    return (
+                        Some(NapiInferenceProvider::IntelGpu),
+                        openvino_ordinal(device.strip_prefix("GPU").unwrap_or(device)),
+                    );
+                }
             }
             (
                 Some(NapiInferenceProvider::OpenVino),
@@ -398,6 +404,45 @@ mod tests {
 
         assert_eq!(options.backend, Backend::OpenVino);
         assert_eq!(options.openvino_device_type.as_deref(), Some("GPU.1"));
+    }
+
+    #[test]
+    fn merge_options_maps_intel_npu_to_hetero_policy() {
+        let mut input = empty_options();
+        input.provider = Some(NapiInferenceProvider::IntelNpu);
+
+        let options = merge_options_from(SessionOptions::default(), input).unwrap();
+
+        assert_eq!(options.backend, Backend::OpenVino);
+        assert_eq!(
+            options.openvino_device_type.as_deref(),
+            Some("HETERO:NPU,CPU")
+        );
+    }
+
+    #[test]
+    fn configuration_preserves_intel_npu_for_hetero_policy() {
+        let options = SessionOptions::for_device(
+            DeviceSelection::new(DeviceProvider::IntelNpu).with_device("0"),
+        )
+        .unwrap();
+
+        let (provider, device) = provider_configuration(&options);
+
+        assert!(matches!(provider, Some(NapiInferenceProvider::IntelNpu)));
+        assert_eq!(device, None);
+
+        let strict_options = SessionOptions::for_device(
+            DeviceSelection::new(DeviceProvider::OpenVino).with_device("NPU"),
+        )
+        .unwrap();
+        let (strict_provider, strict_device) = provider_configuration(&strict_options);
+
+        assert!(matches!(
+            strict_provider,
+            Some(NapiInferenceProvider::IntelNpu)
+        ));
+        assert_eq!(strict_device, None);
     }
 
     #[test]

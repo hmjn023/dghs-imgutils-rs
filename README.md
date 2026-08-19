@@ -432,8 +432,12 @@ before ONNX Runtime loads its provider; an existing `OCL_ICD_VENDORS` or
 `intel_npu`, `amd_gpu`, `amd_npu`, or `openvino`. `device` is optional: CUDA,
 TensorRT, AMD GPU, and DirectML accept an ordinal string such as `"1"`; Intel
 providers accept `"0"`, `"GPU.0"`, or `"NPU.0"`. Omitting it delegates the
-provider's default device selection to the runtime. The old `backend`,
-`deviceId`, and `openvinoDeviceType` fields remain as compatibility aliases.
+provider's default device selection to the runtime. `intel_npu` is an
+NPU-first policy with CPU fallback (`HETERO:NPU,CPU`) so models containing
+operators that the VPUX compiler cannot lower remain executable. Use
+`openvino` with `device: 'NPU'` when strict NPU-only execution is required.
+The old `backend`, `deviceId`, and `openvinoDeviceType` fields remain as
+compatibility aliases.
 
 For UI-driven selection, model-backed N-API functions also accept an optional
 `inferenceOptions` object as their final argument. This is call-local, so a UI
@@ -667,8 +671,11 @@ cargo build --release --features openvino
 Select the device when starting the application. `NPU` selects the Intel NPU and `GPU` selects the Intel XPU/GPU.
 
 ```bash
-# Intel NPU
+# Intel NPU (strict NPU-only policy; unsupported model operators may fail)
 export DGHS_ORT_DEVICE=NPU
+
+# NPU first with CPU fallback (equivalent to provider: 'intel_npu')
+# export DGHS_ORT_DEVICE=HETERO:NPU,CPU
 
 # Intel XPU/GPU. The library selects the Intel OpenCL ICD automatically when
 # OCL_ICD_VENDORS is not already set.
@@ -715,11 +722,12 @@ cargo run --no-default-features --features openvino --example intel_ep_probe -- 
   --provider intel_npu --device 0 .ort-runtime/onnxruntime/datasets/sigmoid.onnx
 ```
 
-An explicit `provider` is strict: if that device cannot initialize or the model
-cannot be committed, the library returns an error instead of hiding the failure
-behind CPU fallback. The automatic policy is the mode that may fall back to
-CPU. The probe with `--run` validates both session creation and a real
-inference call; use `ep_probe` for a provider capability diagnostic.
+`intel_npu` intentionally uses the NPU-first `HETERO:NPU,CPU` policy because
+some valid ONNX graphs contain operations or mixed tensor types that the NPU
+compiler cannot lower. Use `provider: 'openvino', device: 'NPU'` for strict
+NPU-only execution. The automatic policy may also fall back to CPU. The probe
+with `--run` validates both session creation and a real inference call; use
+`ep_probe` for a provider capability diagnostic.
 
 The `onnxruntime-openvino` shared libraries come from the [official ONNX Runtime OpenVINO Execution Provider distribution](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html). Keep the files from the same `capi` directory together and do not mix them with a different OpenVINO installation.
 
