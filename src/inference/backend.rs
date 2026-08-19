@@ -92,7 +92,8 @@ impl FromStr for Backend {
 /// `Backend::OpenVino` is an implementation detail of the OpenVINO execution
 /// provider.  The Intel variants keep the public selector explicit so callers
 /// can request `intel_gpu` or `intel_npu` without depending on OpenVINO's
-/// provider name.
+/// provider name. `intel_npu` uses an NPU-first HETERO policy and falls back to
+/// the CPU for operators that the NPU compiler cannot lower.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceProvider {
@@ -171,8 +172,10 @@ impl FromStr for DeviceProvider {
 ///
 /// CUDA, TensorRT, AMD GPU, and DirectML use a numeric ordinal such as `"1"`.
 /// Intel providers accept `"0"`, `"GPU.0"`, or `"NPU.0"`; when omitted they
-/// use the provider default (`GPU` or `NPU`).  OpenVINO accepts its native
-/// device policy string.
+/// use the provider default (`GPU` or `NPU`). `intel_npu` wraps that device in
+/// `HETERO:<npu>,CPU` so unsupported operators can run on the CPU. OpenVINO
+/// accepts its native device policy string, including strict `"NPU"` when a
+/// caller explicitly requires NPU-only execution.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeviceSelection {
     pub provider: DeviceProvider,
@@ -208,7 +211,7 @@ impl DeviceSelection {
             DeviceProvider::IntelNpu => {
                 options.device_id = 0;
                 options.openvino_device_type =
-                    Some(intel_openvino_device("NPU", self.device.as_deref())?);
+                    Some(intel_npu_openvino_device(self.device.as_deref())?);
             }
             DeviceProvider::OpenVino => {
                 options.device_id = 0;
@@ -322,6 +325,20 @@ fn intel_openvino_device(
         provider_device.to_ascii_lowercase(),
         device
     )))
+}
+
+/// Builds the default policy for the public Intel NPU provider.
+///
+/// OpenVINO's NPU plugin can reject otherwise valid ONNX graphs when an
+/// operator or tensor type is not supported by the VPUX compiler. A strict
+/// `NPU` policy can then abort the process from inside the compiler instead of
+/// returning an ordinary session error. HETERO keeps the NPU as the primary
+/// device while routing unsupported graph partitions to the CPU.
+fn intel_npu_openvino_device(device: Option<&str>) -> Result<String, InferenceError> {
+    Ok(format!(
+        "HETERO:{},CPU",
+        intel_openvino_device("NPU", device)?
+    ))
 }
 
 /// A provider precision request. Backend-specific validation happens while a
@@ -1044,7 +1061,10 @@ mod tests {
         let intel_npu =
             SessionOptions::for_device(DeviceSelection::new(DeviceProvider::IntelNpu)).unwrap();
         assert_eq!(intel_npu.backend, Backend::OpenVino);
-        assert_eq!(intel_npu.openvino_device_type.as_deref(), Some("NPU"));
+        assert_eq!(
+            intel_npu.openvino_device_type.as_deref(),
+            Some("HETERO:NPU,CPU")
+        );
     }
 
     #[test]
@@ -1064,7 +1084,10 @@ mod tests {
             DeviceSelection::new(DeviceProvider::IntelNpu).with_device("0"),
         )
         .unwrap();
-        assert_eq!(intel_npu.openvino_device_type.as_deref(), Some("NPU"));
+        assert_eq!(
+            intel_npu.openvino_device_type.as_deref(),
+            Some("HETERO:NPU,CPU")
+        );
     }
 
     #[test]
