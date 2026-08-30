@@ -47,6 +47,22 @@ pub fn open_image_robust(path: &str) -> image::ImageResult<DynamicImage> {
     }
 }
 
+fn collect_pixai_attributes(result: &crate::tagging::TagResult) -> HashMap<String, String> {
+    let mut attributes = HashMap::new();
+    for (tag_name, _) in &result.general {
+        attributes.insert(tag_name.clone(), "general".to_string());
+    }
+    for (tag_name, _) in &result.character {
+        attributes.insert(tag_name.clone(), "character".to_string());
+    }
+    for (category, tags) in &result.rest {
+        for (tag_name, _) in tags {
+            attributes.insert(tag_name.clone(), category.clone());
+        }
+    }
+    attributes
+}
+
 /// PixAI Tagger の予測結果を JS/TS 側で表現する構造体
 #[napi(object)]
 pub struct PixaiTagResult {
@@ -54,6 +70,10 @@ pub struct PixaiTagResult {
     pub general: HashMap<String, f64>,
     /// キャラクター名タグ（遠坂凛, ニェンなど）とそれぞれの確信度スコア
     pub character: HashMap<String, f64>,
+    /// 検出されたタグ名から PixAI のカテゴリ名へのマッピング
+    ///
+    /// `general` / `character` に含まれないカテゴリも含みます。
+    pub attributes: HashMap<String, String>,
     /// 検出されたキャラクターからマッピングされた原作 IP (著作物名) のリスト
     pub ips: Vec<String>,
     /// 検出されたキャラクター名とその IP のマッピング
@@ -98,7 +118,11 @@ pub async fn get_pixai_tags(
         })
     })?;
 
-    // 3. f32 -> f64 に変換して返す
+    // 3. タグ名からカテゴリ名へのマッピングを保持する。
+    //    コア実装は、thresholds.csv のカテゴリ名を rest のキーとして保持している。
+    let attributes = collect_pixai_attributes(&result);
+
+    // 4. f32 -> f64 に変換して返す
     let general = result
         .general
         .into_iter()
@@ -113,9 +137,43 @@ pub async fn get_pixai_tags(
     Ok(PixaiTagResult {
         general,
         character,
+        attributes,
         ips: result.ips,
         ips_mapping: result.ips_mapping,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_pixai_attributes;
+    use crate::tagging::TagResult;
+    use std::collections::HashMap;
+
+    #[test]
+    fn collects_categories_for_all_pixai_tag_groups() {
+        let general = vec![("1girl".to_string(), 0.9)];
+        let character = vec![("hatsune_miku".to_string(), 0.8)];
+        let mut rest = HashMap::new();
+        rest.insert("copyright".to_string(), vec![("vocaloid".to_string(), 0.7)]);
+
+        let result = TagResult {
+            general,
+            character,
+            rest,
+            tag: Vec::new(),
+            ips: Vec::new(),
+            ips_mapping: HashMap::new(),
+        };
+
+        assert_eq!(
+            collect_pixai_attributes(&result),
+            HashMap::from([
+                ("1girl".to_string(), "general".to_string()),
+                ("hatsune_miku".to_string(), "character".to_string()),
+                ("vocaloid".to_string(), "copyright".to_string()),
+            ])
+        );
+    }
 }
 
 /// 指定した画像ファイルパスから CCIP モデルを用いてキャラクター対照学習特徴量（768次元ベクトル）を抽出します。
