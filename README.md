@@ -25,6 +25,7 @@ A high-performance Rust implementation of [dghs-imgutils](https://github.com/dee
 | **upscale** | Super-resolution (CDC upscaling) |
 | **ascii** | ASCII art generation |
 | **resource** | Background image dataset management |
+| **generic** | CLIP, SigLIP, and EmbeddingGemma 2 image/text embeddings |
 
 ## Installation
 
@@ -102,6 +103,64 @@ const emb2 = await ccipGetEmbedding('./character_b.jpg');
 const isSame = ccipSame(emb1, emb2);
 console.log(`Same character: ${isSame}`);
 ```
+
+### EmbeddingGemma 2 image/text search
+
+The native Rust and Node.js APIs use the existing
+[ONNX export](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX)
+of [Google EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2).
+No Python or conversion step is required at inference time.
+
+```typescript
+import { embeddinggemma2ImageEncode, embeddinggemma2TextEncode } from 'dghs-imgutils-rs';
+
+const options = { dtype: 'q8', dimensions: 768 };
+const inference = { backend: 'cpu', precision: 'fp32' };
+const [query] = embeddinggemma2TextEncode(['赤い服を着たキャラクター'], 'SearchQuery', options, inference);
+const images = embeddinggemma2ImageEncode(['./character_a.jpg', './character_b.jpg'], options, inference);
+const scores = images.map(image => image.reduce((sum, value, i) => sum + value * query[i], 0));
+console.log(scores); // cosine similarity; higher is more similar
+```
+
+Rust equivalents are `generic::embeddinggemma2::{embeddinggemma2_text_encode,
+embeddinggemma2_image_encode, EmbeddingGemma2Options, EmbeddingGemma2TextTask}`.
+Both APIs return one L2-normalized vector per input. Supported dimensions are
+768 (default), 512, 256, and 128; truncation always re-normalizes the vector.
+Use matching dimensions for queries and images, preferably at least 256 for images.
+
+Q8 is the default: text weights are about 314 MB, with an additional 195 MB for
+images and a 32 MB tokenizer. FP32 and Q4 are also available; these are weight
+formats, separate from the execution provider's precision. Start with CPU/FP32;
+other providers need their own compatibility and accuracy checks. Unused audio
+weights are not downloaded. Files are cached in the Hugging Face cache.
+For ONNX Runtime 1.24 compatibility, symlinked external weights are also staged
+under `IU_HOME` (or the library's default storage directory), using hard links
+where possible and a copy when the caches are on different filesystems.
+
+Set `modelDir` (`model_dir` in Rust) to use a local export root containing
+`tokenizer.json`, `onnx/model_quantized.onnx`, its adjacent `.onnx_data` file,
+and the equivalent `vision_encoder_quantized` files for images.
+The vision budget is controlled by `maxSoftTokens` (70, 140, 280 default, 560,
+or 1120). Text uses `SearchQuery` by default; choose `Document` for corpus text
+or `Raw` for an already formatted task/title prefix. Inputs exceeding 8192
+tokens are rejected. Images are encoded separately; mixed media, audio, and
+video inputs are not exposed. Node.js calls are synchronous; use a worker for
+interactive applications.
+
+An opt-in Python/Rust ONNX parity check is available:
+
+```bash
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/export \
+  cargo test --no-default-features --test embeddinggemma2_benchmark -- --ignored --nocapture
+# After npm run build:debug, verify the native Node.js API too:
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/export \
+  node scripts/test-embeddinggemma2.mjs ./image.png
+```
+
+The parity check requires `uv` and an installed ONNX Runtime (use
+`ORT_DYLIB_PATH` when needed). It compares tokenization and Pillow image
+preprocessing against Rust using the same Q8 export, not export accuracy
+against the original PyTorch model.
 
 ## Supported Models
 

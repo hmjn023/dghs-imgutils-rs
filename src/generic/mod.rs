@@ -1,4 +1,5 @@
 pub mod clip;
+pub mod embeddinggemma2;
 pub mod enhance;
 pub mod siglip;
 pub mod timm;

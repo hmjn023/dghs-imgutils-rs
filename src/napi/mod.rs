@@ -593,6 +593,7 @@ pub fn get_title() -> String {
 
 pub mod detect;
 pub mod edge;
+pub mod embeddinggemma2;
 pub mod generic;
 pub mod image_utils;
 pub mod inference;
