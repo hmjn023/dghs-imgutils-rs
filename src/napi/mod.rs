@@ -413,7 +413,7 @@ pub fn ccip_cluster(
             )
         })?;
 
-    Ok(clusters.into_iter().map(|v| v as i32).collect())
+    Ok(clusters)
 }
 
 /// 指定したローカル画像ファイルを読み込み、RGBA 画像の場合は白背景をブレンドして RGB 画像として返します。

@@ -100,6 +100,10 @@ fn mcut_threshold(probs: &[f32]) -> f32 {
     (sorted[max_idx] + sorted[max_idx + 1]) / 2.0
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing public API and Python-compatible options"
+)]
 pub fn get_wd14_tags(
     image: &DynamicImage,
     model_name: &str,
@@ -218,11 +222,9 @@ pub fn get_wd14_tags(
                     all_tags.push((tag.name.clone(), prob));
                 }
             }
-            4 => {
-                if prob > char_th {
-                    character.push((tag.name.clone(), prob));
-                    all_tags.push((tag.name.clone(), prob));
-                }
+            4 if prob > char_th => {
+                character.push((tag.name.clone(), prob));
+                all_tags.push((tag.name.clone(), prob));
             }
             _ => {}
         }

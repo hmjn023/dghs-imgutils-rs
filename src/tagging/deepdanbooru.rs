@@ -45,8 +45,8 @@ pub fn get_deepdanbooru_tags(
     let mut array = Array4::<f32>::zeros((1, 512usize, 512usize, 3));
     let rgb8 = resized.to_rgb8();
     for (x, y, pixel) in rgb8.enumerate_pixels() {
-        let ay = (y as i32 + pad_top).max(0).min(511) as usize;
-        let ax = (x as i32 + pad_left).max(0).min(511) as usize;
+        let ay = (y as i32 + pad_top).clamp(0, 511) as usize;
+        let ax = (x as i32 + pad_left).clamp(0, 511) as usize;
         array[[0, ay, ax, 0]] = pixel[0] as f32 / 255.0;
         array[[0, ay, ax, 1]] = pixel[1] as f32 / 255.0;
         array[[0, ay, ax, 2]] = pixel[2] as f32 / 255.0;
@@ -104,11 +104,9 @@ pub fn get_deepdanbooru_tags(
                     all_tags.push((tag_name, prob));
                 }
             }
-            4 => {
-                if prob >= character_threshold {
-                    character.push((tag_name.clone(), prob));
-                    all_tags.push((tag_name, prob));
-                }
+            4 if prob >= character_threshold => {
+                character.push((tag_name.clone(), prob));
+                all_tags.push((tag_name, prob));
             }
             _ => {}
         }

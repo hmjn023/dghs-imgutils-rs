@@ -66,9 +66,9 @@ fn box_filter_2d(arr: &Array2<f32>, radius: usize) -> Array2<f32> {
     let mut result = Array2::<f32>::zeros((h, w));
     for y in 0..h {
         for x in 0..w {
-            let y_start = if y >= radius { y - radius } else { 0 };
+            let y_start = y.saturating_sub(radius);
             let y_end = (y + radius + 1).min(h);
-            let x_start = if x >= radius { x - radius } else { 0 };
+            let x_start = x.saturating_sub(radius);
             let x_end = (x + radius + 1).min(w);
             let mut sum = 0.0;
             let mut count = 0.0;
@@ -162,8 +162,8 @@ fn bilateral_filter_color(
             let g0 = img[[1, y, x]];
             let b0 = img[[2, y, x]];
 
-            for dy in 0..diameter {
-                for dx in 0..diameter {
+            for (dy, spatial_row) in spatial_weights.iter().enumerate() {
+                for (dx, spatial_weight) in spatial_row.iter().enumerate() {
                     let ny = y as isize + dy as isize - half;
                     let nx = x as isize + dx as isize - half;
                     if ny < 0 || ny >= h as isize || nx < 0 || nx >= w as isize {
@@ -177,7 +177,7 @@ fn bilateral_filter_color(
                     let db = b0 - img[[2, ny, nx]];
                     let range_dist = dr * dr + dg * dg + db * db;
                     let range_weight = (-range_dist / (2.0 * sigma_color * sigma_color)).exp();
-                    let weight = spatial_weights[dy][dx] * range_weight;
+                    let weight = spatial_weight * range_weight;
 
                     sum[0] += img[[0, ny, nx]] * weight;
                     sum[1] += img[[1, ny, nx]] * weight;

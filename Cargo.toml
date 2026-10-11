@@ -2,6 +2,8 @@
 name = "dghs-imgutils-rs"
 version = "0.5.2"
 edition = "2024"
+# The manual benchmark below is a CLI binary, not a libtest benchmark target.
+autobenches = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

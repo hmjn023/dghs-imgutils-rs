@@ -27,10 +27,10 @@ pub fn load_image_with_background(
     force_background: Option<[u8; 3]>,
 ) -> Result<DynamicImage, ImageError> {
     let img = load_image(source)?;
-    if let Some(bg) = force_background {
-        if img.color().has_alpha() {
-            return Ok(crate::image::force_image_background(&img, bg));
-        }
+    if let Some(bg) = force_background
+        && img.color().has_alpha()
+    {
+        return Ok(crate::image::force_image_background(&img, bg));
     }
     Ok(img)
 }

@@ -250,15 +250,10 @@ pub fn download_image_from_url(url: &str) -> Result<DynamicImage, ImageError> {
     let mut bytes = Vec::new();
     ureq::get(&actual_url)
         .call()
-        .map_err(|e| {
-            ImageError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?
+        .map_err(|e| ImageError::Io(std::io::Error::other(e.to_string())))?
         .into_reader()
         .read_to_end(&mut bytes)
-        .map_err(|e| ImageError::Io(e))?;
+        .map_err(ImageError::Io)?;
     image::load_from_memory(&bytes).map_err(|e| ImageError::Processing(e.to_string()))
 }
 
@@ -305,7 +300,7 @@ pub fn grid_background(
     let mut img = image::RgbImage::new(width, height);
     for y in 0..height {
         for x in 0..width {
-            let color = if (x / s + y / s) % 2 == 0 {
+            let color = if (x / s + y / s).is_multiple_of(2) {
                 backcolor
             } else {
                 forecolor

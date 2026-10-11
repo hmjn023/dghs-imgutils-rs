@@ -174,12 +174,7 @@ pub fn yolo_segment(
                 y2: d.bbox.3 as i32,
                 label: d.label,
                 score: d.score as f64,
-                mask: d
-                    .mask
-                    .into_raw_vec()
-                    .into_iter()
-                    .map(|v| v as f64)
-                    .collect(),
+                mask: d.mask.iter().map(|&v| f64::from(v)).collect(),
                 mask_height: mh as i32,
                 mask_width: mw as i32,
             }

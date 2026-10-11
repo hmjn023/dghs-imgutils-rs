@@ -1,7 +1,6 @@
 //! Data utils precision benchmark comparing Rust vs Python for image loading, encoding, and compositing.
 
-use image::{DynamicImage, RgbImage, RgbaImage};
-use ndarray::Array3;
+use image::{DynamicImage, GenericImageView, RgbImage};
 use std::path::PathBuf;
 use std::time::Instant;
 

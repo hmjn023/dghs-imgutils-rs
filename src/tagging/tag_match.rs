@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 pub fn split_to_words(text: &str) -> Vec<String> {
-    text.split(|c: char| c == '_' || c == ' ')
+    text.split(['_', ' '])
         .filter(|s| !s.is_empty())
         .map(|s| s.to_lowercase())
         .collect()

@@ -27,12 +27,11 @@ pub fn load_system_font() -> Option<ab_glyph::FontVec> {
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
     ];
     for path in &font_paths {
-        if std::path::Path::new(path).exists() {
-            if let Ok(data) = std::fs::read(path) {
-                if let Ok(font) = ab_glyph::FontVec::try_from_vec(data) {
-                    return Some(font);
-                }
-            }
+        if std::path::Path::new(path).exists()
+            && let Ok(data) = std::fs::read(path)
+            && let Ok(font) = ab_glyph::FontVec::try_from_vec(data)
+        {
+            return Some(font);
         }
     }
     None
@@ -146,54 +145,48 @@ pub fn detection_visualize(
         imageproc::drawing::draw_hollow_rect_mut(&mut visual_image, inner_rect, color);
 
         // 3. テキストラベルと信頼度スコアの描画
-        if !no_label {
-            if let Some(ref font) = system_font {
-                let label_text =
-                    format!("{}: {:.2}%", detect_item.label, detect_item.score * 100.0);
-                let scale = ab_glyph::PxScale::from(fontsize);
+        if !no_label && let Some(ref font) = system_font {
+            let label_text = format!("{}: {:.2}%", detect_item.label, detect_item.score * 100.0);
+            let scale = ab_glyph::PxScale::from(fontsize);
 
-                // テキストの幅・高さを大雑把に計算 (ポータブルな文字幅近似)
-                let text_w = (label_text.len() as f32 * fontsize * 0.55) as u32;
-                let text_h = fontsize as u32;
+            // テキストの幅・高さを大雑把に計算 (ポータブルな文字幅近似)
+            let text_w = (label_text.len() as f32 * fontsize * 0.55) as u32;
+            let text_h = fontsize as u32;
 
-                let box_y = if y0 >= text_h + text_padding * 2 {
-                    y0 - text_h - text_padding * 2
-                } else {
-                    y0
-                };
+            let box_y = if y0 >= text_h + text_padding * 2 {
+                y0 - text_h - text_padding * 2
+            } else {
+                y0
+            };
 
-                // 半透明背景ボックスの塗りつぶし描画
-                let alpha = 0.5f32;
-                for y_offset in 0..(text_h + text_padding * 2) {
-                    for x_offset in 0..(text_w + text_padding * 2) {
-                        let px = x0 + x_offset;
-                        let py = box_y + y_offset;
-                        if px < new_width && py < new_height {
-                            let pixel = visual_image.get_pixel_mut(px, py);
-                            pixel[0] = ((color[0] as f32 * alpha)
-                                + (pixel[0] as f32 * (1.0 - alpha)))
-                                as u8;
-                            pixel[1] = ((color[1] as f32 * alpha)
-                                + (pixel[1] as f32 * (1.0 - alpha)))
-                                as u8;
-                            pixel[2] = ((color[2] as f32 * alpha)
-                                + (pixel[2] as f32 * (1.0 - alpha)))
-                                as u8;
-                        }
+            // 半透明背景ボックスの塗りつぶし描画
+            let alpha = 0.5f32;
+            for y_offset in 0..(text_h + text_padding * 2) {
+                for x_offset in 0..(text_w + text_padding * 2) {
+                    let px = x0 + x_offset;
+                    let py = box_y + y_offset;
+                    if px < new_width && py < new_height {
+                        let pixel = visual_image.get_pixel_mut(px, py);
+                        pixel[0] =
+                            ((color[0] as f32 * alpha) + (pixel[0] as f32 * (1.0 - alpha))) as u8;
+                        pixel[1] =
+                            ((color[1] as f32 * alpha) + (pixel[1] as f32 * (1.0 - alpha))) as u8;
+                        pixel[2] =
+                            ((color[2] as f32 * alpha) + (pixel[2] as f32 * (1.0 - alpha))) as u8;
                     }
                 }
-
-                // テキスト自体の描画 (文字色は黒)
-                imageproc::drawing::draw_text_mut(
-                    &mut visual_image,
-                    image::Rgba([0, 0, 0, 255]),
-                    (x0 + text_padding) as i32,
-                    (box_y + text_padding) as i32,
-                    scale,
-                    font,
-                    &label_text,
-                );
             }
+
+            // テキスト自体の描画 (文字色は黒)
+            imageproc::drawing::draw_text_mut(
+                &mut visual_image,
+                image::Rgba([0, 0, 0, 255]),
+                (x0 + text_padding) as i32,
+                (box_y + text_padding) as i32,
+                scale,
+                font,
+                &label_text,
+            );
         }
     }
 

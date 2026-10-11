@@ -127,6 +127,8 @@ fn test_imgcensor_areas_multiple() {
     // Both areas should be stamped
     assert_eq!(target.get_pixel(15, 15)[0], 255);
     assert_eq!(target.get_pixel(65, 65)[0], 255);
+    assert_eq!(target.get_pixel(20, 20), &Rgba([255, 50, 50, 255]));
+    assert_eq!(target.get_pixel(70, 70), &Rgba([255, 50, 50, 255]));
 
     // Middle should be white
     assert_eq!(target.get_pixel(45, 45)[0], 255);
@@ -143,6 +145,7 @@ fn test_imgcensor_edge_clip() {
     censor_area_image(&mut target, &area, &stamp, CensorImageFit::Contain);
     // Pixels inside the image portion of the area should still be stamped
     assert_eq!(target.get_pixel(29, 29)[0], 255);
+    assert!(target.get_pixel(29, 29)[1] < 255);
 }
 
 #[test]
