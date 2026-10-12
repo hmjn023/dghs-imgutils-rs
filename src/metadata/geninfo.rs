@@ -137,24 +137,22 @@ fn extract_gif_comment(data: &[u8]) -> Option<String> {
     // コメント拡張ブロック: 0x21 0xFE [size] [data...] 0x00
     let mut pos = 6usize;
     while pos + 1 < data.len() {
-        if data[pos] == 0x21 && pos + 1 < data.len() {
-            if data[pos + 1] == 0xFE {
-                // コメント拡張ブロック
-                pos += 2;
-                let mut comment = Vec::new();
-                while pos < data.len() && data[pos] != 0x00 {
-                    let block_size = data[pos] as usize;
-                    pos += 1;
-                    if pos + block_size <= data.len() {
-                        comment.extend_from_slice(&data[pos..pos + block_size]);
-                        pos += block_size;
-                    } else {
-                        break;
-                    }
+        if data[pos] == 0x21 && pos + 1 < data.len() && data[pos + 1] == 0xFE {
+            // コメント拡張ブロック
+            pos += 2;
+            let mut comment = Vec::new();
+            while pos < data.len() && data[pos] != 0x00 {
+                let block_size = data[pos] as usize;
+                pos += 1;
+                if pos + block_size <= data.len() {
+                    comment.extend_from_slice(&data[pos..pos + block_size]);
+                    pos += block_size;
+                } else {
+                    break;
                 }
-                if !comment.is_empty() {
-                    return Some(String::from_utf8_lossy(&comment).to_string());
-                }
+            }
+            if !comment.is_empty() {
+                return Some(String::from_utf8_lossy(&comment).to_string());
             }
         }
         pos += 1;
@@ -220,7 +218,7 @@ pub fn write_geninfo_gif(src_path: &str, dst_path: &str, geninfo: &str) -> std::
 
 /// PNG バイト列の IEND チャンク直前に tEXt チャンクを挿入します。
 fn inject_png_text_chunk(data: &[u8], key: &str, value: &str) -> std::io::Result<Vec<u8>> {
-    if data.len() < 8 || &data[..8] != [137, 80, 78, 71, 13, 10, 26, 10] {
+    if data.len() < 8 || data[..8] != [137, 80, 78, 71, 13, 10, 26, 10] {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Not a valid PNG file",
@@ -336,7 +334,7 @@ fn build_exif_app1_with_user_comment(comment_bytes: &[u8]) -> std::io::Result<Ve
     exif_inner.extend_from_slice(&0x8769u16.to_le_bytes()); // tag
     exif_inner.extend_from_slice(&4u16.to_le_bytes()); // type: LONG
     exif_inner.extend_from_slice(&1u32.to_le_bytes()); // count
-    let exif_ifd_offset = ifd0_offset as u32 + 2 + 12 * 1 + 4 + 40; // after IFD0 + next_ifd + padding
+    let exif_ifd_offset = ifd0_offset as u32 + 2 + 12 + 4 + 40; // after IFD0 + next_ifd + padding
     exif_inner.extend_from_slice(&exif_ifd_offset.to_le_bytes()); // value
     exif_inner.extend_from_slice(&0u32.to_le_bytes()); // next IFD offset (none)
 
@@ -499,7 +497,6 @@ fn crc32_ieee(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn create_test_png_with_text(key: &str, value: &str) -> Vec<u8> {
         // Minimal valid PNG with one tEXt chunk

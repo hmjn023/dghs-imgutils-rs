@@ -90,7 +90,7 @@ fn get_cdc_model(model: &str) -> Result<(Arc<Mutex<ort::session::Session>>, usiz
                 "CDC model scale mismatch: height_scale={scale_h}, width_scale={scale_w}"
             )));
         }
-        scale_h as usize
+        scale_h
     };
 
     // メタデータをキャッシュに保存

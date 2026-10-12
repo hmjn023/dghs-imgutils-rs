@@ -1,10 +1,20 @@
 pub mod clip;
+pub mod embeddinggemma2;
 pub mod enhance;
 pub mod siglip;
 pub mod timm;
 pub mod yoloseg;
 
 use thiserror::Error;
+
+/// A batch of feature vectors or a matrix of pairwise scores.
+pub type EmbeddingBatch = Vec<Vec<f32>>;
+
+/// Normalized embeddings and raw encoder features, in input order.
+pub type EncoderOutput = (EmbeddingBatch, EmbeddingBatch);
+
+/// Pairwise similarities, scaled logits, and model-specific predictions.
+pub type PredictionOutput = (EmbeddingBatch, EmbeddingBatch, EmbeddingBatch);
 
 #[derive(Debug, Error)]
 pub enum GenericError {

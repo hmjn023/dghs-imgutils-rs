@@ -122,6 +122,10 @@ pub fn get_deepgelbooru_tags(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing NAPI API; the macro duplicates lint attributes"
+)]
 #[napi]
 pub fn get_wd14_tags(
     path: String,

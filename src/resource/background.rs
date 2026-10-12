@@ -108,10 +108,8 @@ pub fn list_bg_images() -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    for result in rdr.deserialize::<CsvRecord>() {
-        if let Ok(record) = result {
-            images.push(record.filename);
-        }
+    for record in rdr.deserialize::<CsvRecord>().flatten() {
+        images.push(record.filename);
     }
 
     images
@@ -181,16 +179,15 @@ fn extract_file_from_tar(
 
     for entry in archive.entries()? {
         let mut entry = entry?;
-        if let Ok(entry_path) = entry.path() {
-            if entry_path
+        if let Ok(entry_path) = entry.path()
+            && entry_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n == filename)
-            {
-                let output_path = output_dir.join(filename);
-                entry.unpack(&output_path)?;
-                return Ok(());
-            }
+        {
+            let output_path = output_dir.join(filename);
+            entry.unpack(&output_path)?;
+            return Ok(());
         }
     }
 

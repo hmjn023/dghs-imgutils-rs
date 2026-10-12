@@ -55,8 +55,7 @@ pub fn censor_area_image(
     let new_w = ((cw as f32 * scale).round() as u32).max(1);
     let new_h = ((ch as f32 * scale).round() as u32).max(1);
 
-    let resized = censor_image.resize_exact(new_w, new_h, imageops::FilterType::Lanczos3);
-    let rgba = resized.to_rgba8();
+    let rgba = resize_stamp(censor_image, new_w, new_h);
 
     let offset_x = x1 + (area_w.saturating_sub(new_w)) / 2;
     let offset_y = y1 + (area_h.saturating_sub(new_h)) / 2;
@@ -84,6 +83,38 @@ pub fn censor_area_image(
     }
 }
 
+/// Resize premultiplied colors so fully transparent pixels cannot tint edges.
+fn resize_stamp(image: &DynamicImage, width: u32, height: u32) -> RgbaImage {
+    if (width, height) == (image.width(), image.height()) {
+        return image.to_rgba8();
+    }
+    let mut premultiplied = image.to_rgba32f();
+    for pixel in premultiplied.pixels_mut() {
+        for channel in 0..3 {
+            pixel[channel] *= pixel[3];
+        }
+    }
+    let resized = imageops::resize(
+        &premultiplied,
+        width,
+        height,
+        imageops::FilterType::Lanczos3,
+    );
+    RgbaImage::from_fn(width, height, |x, y| {
+        let pixel = resized.get_pixel(x, y);
+        let alpha = pixel[3].clamp(0.0, 1.0);
+        if alpha == 0.0 {
+            return image::Rgba([0, 0, 0, 0]);
+        }
+        image::Rgba([
+            ((pixel[0] / alpha).clamp(0.0, 1.0) * 255.0).round() as u8,
+            ((pixel[1] / alpha).clamp(0.0, 1.0) * 255.0).round() as u8,
+            ((pixel[2] / alpha).clamp(0.0, 1.0) * 255.0).round() as u8,
+            (alpha * 255.0).round() as u8,
+        ])
+    })
+}
+
 /// 複数の BBox 領域に検閲画像をオーバーレイします。
 pub fn censor_areas_image(
     target: &mut RgbaImage,
@@ -101,6 +132,33 @@ pub fn censor_areas_image(
 mod tests {
     use super::*;
     use image::Rgba;
+
+    #[test]
+    fn transparent_stamp_colors_do_not_bleed_into_resized_edges() {
+        let stamp = |transparent_color| {
+            let mut image = RgbaImage::from_pixel(2, 2, transparent_color);
+            image.put_pixel(0, 0, Rgba([255, 0, 0, 255]));
+            DynamicImage::ImageRgba8(image)
+        };
+        let mut first = RgbaImage::from_pixel(16, 16, Rgba([255, 255, 255, 255]));
+        let mut second = first.clone();
+        let area = [0.0, 0.0, 16.0, 16.0];
+        censor_area_image(
+            &mut first,
+            &area,
+            &stamp(Rgba([0, 0, 0, 0])),
+            CensorImageFit::Contain,
+        );
+        censor_area_image(
+            &mut second,
+            &area,
+            &stamp(Rgba([0, 0, 255, 0])),
+            CensorImageFit::Contain,
+        );
+        assert_eq!(first, second);
+        assert!(first.pixels().all(|pixel| pixel[0] == 255));
+        assert!(first.pixels().any(|pixel| pixel[1] > 0 && pixel[1] < 255));
+    }
 
     fn make_solid_rgba(w: u32, h: u32, color: Rgba<u8>) -> DynamicImage {
         let mut buf = RgbaImage::new(w, h);

@@ -163,7 +163,7 @@ mod tests {
     fn test_dummy_enhancer_rgb() {
         let enhancer = DummyEnhancer;
         let mut img = ImageBuffer::new(4, 4);
-        for (x, y, p) in img.enumerate_pixels_mut() {
+        for p in img.pixels_mut() {
             *p = Rgba([100, 150, 200, 255]);
         }
         let dyn_img = DynamicImage::ImageRgba8(img);

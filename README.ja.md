@@ -25,6 +25,7 @@
 | **upscale** | 超解像（CDCアップスケーリング） |
 | **ascii** | アスキーアート生成 |
 | **resource** | 背景画像データセット管理 |
+| **generic** | CLIP、SigLIP、EmbeddingGemma 2 の画像・テキスト埋め込み |
 
 ## インストール
 
@@ -102,6 +103,60 @@ const emb2 = ccipGetEmbedding('./character_b.jpg');
 const isSame = ccipSame(emb1, emb2);
 console.log(`同一キャラクター: ${isSame}`);
 ```
+
+### EmbeddingGemma 2 による画像・テキスト検索
+
+[Google EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) の
+[公開ONNX版](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX) を
+Rust / Node.js のネイティブAPIから利用できます。推論時にPythonやONNX変換は不要です。
+
+```typescript
+import { embeddinggemma2ImageEncode, embeddinggemma2TextEncode } from 'dghs-imgutils-rs';
+
+const options = { dtype: 'q8', dimensions: 768 };
+const inference = { backend: 'cpu', precision: 'fp32' };
+const [query] = embeddinggemma2TextEncode(['赤い服を着たキャラクター'], 'SearchQuery', options, inference);
+const images = embeddinggemma2ImageEncode(['./character_a.jpg', './character_b.jpg'], options, inference);
+const scores = images.map(image => image.reduce((sum, value, i) => sum + value * query[i], 0));
+console.log(scores); // コサイン類似度。大きいほど類似
+```
+
+Rust APIは `generic::embeddinggemma2::{embeddinggemma2_text_encode,
+embeddinggemma2_image_encode, EmbeddingGemma2Options, EmbeddingGemma2TextTask}` です。
+入力ごとにL2正規化したベクトルを返します。次元数は768（既定）、512、256、128を選択でき、
+切り詰めた後も再正規化します。検索文と画像の次元数を揃えてください。画像検索には256以上を推奨します。
+
+既定のQ8版はテキストの重みが約314 MB、画像用の重みが追加で約195 MB、
+トークナイザーが約32 MBです。FP32・Q4版にも対応しています。
+`dtype` はモデルの重み形式で、推論プロバイダーの精度設定とは別です。
+まずCPU / FP32で利用してください。他のプロバイダーは個別に互換性と精度の確認が必要です。
+音声の重みはダウンロードしません。モデルはHugging Faceキャッシュに保存します。
+ONNX Runtime 1.24との互換性のため、シンボリックリンクになっている外部重みは
+`IU_HOME`（未指定時はライブラリ既定のストレージ）にも配置します。
+通常はハードリンクを使い、異なるファイルシステムの場合はコピーします。
+
+ローカルモデルには `modelDir`（Rustでは `model_dir`）を指定します。
+指定先には `tokenizer.json`、`onnx/model_quantized.onnx` と隣接する `.onnx_data`、
+画像用には同様の `vision_encoder_quantized` の2ファイルを配置してください。
+画像のトークン予算は `maxSoftTokens` で70、140、280（既定）、560、1120から選択できます。
+テキストは既定で `SearchQuery`、検索対象の文章には `Document`、整形済みの指示・タイトルには
+`Raw` を使います。8192トークンを超える入力はエラーになります。
+画像は1枚ごとに独立した埋め込みにします。混在入力・音声・動画のAPIは未対応です。
+Node.js APIは同期実行なので、対話アプリではワーカーから呼び出してください。
+
+PythonとRustの実推論比較、およびNode.js APIの確認手順:
+
+```bash
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/export \
+  cargo test --no-default-features --test embeddinggemma2_benchmark -- --ignored --nocapture
+# npm run build:debug の実行後:
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/export \
+  node scripts/test-embeddinggemma2.mjs ./image.png
+```
+
+比較テストには `uv` とONNX Runtimeが必要です（必要に応じて `ORT_DYLIB_PATH` を指定）。
+同一のQ8 ONNXモデルを使い、トークナイズとPillow画像前処理のRustとの差を検証します。
+元のPyTorchモデルとONNX変換結果の精度比較ではありません。
 
 ## サポートされているモデル
 

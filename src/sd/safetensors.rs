@@ -63,7 +63,6 @@ pub fn read_safetensors_metadata(path: &str) -> Result<HashMap<String, String>, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn create_test_safetensors(metadata: Option<&HashMap<String, String>>) -> Vec<u8> {
         let mut json_map = serde_json::Map::new();

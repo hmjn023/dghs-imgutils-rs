@@ -17,7 +17,7 @@ fn is_count_tag(tag: &str) -> bool {
         return false;
     }
     let rest = &tag[i..];
-    let rest_str = &*rest;
+    let rest_str = rest;
     rest_str == "boy"
         || rest_str == "boys"
         || rest_str == "girl"

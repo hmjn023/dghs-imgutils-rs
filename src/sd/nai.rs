@@ -40,10 +40,10 @@ fn validate_nai_data(data: &HashMap<String, String>) -> bool {
         return false;
     }
     // Generation time があれば float としてパース可能か
-    if let Some(gt) = data.get("Generation time") {
-        if gt.parse::<f64>().is_err() {
-            return false;
-        }
+    if let Some(gt) = data.get("Generation time")
+        && gt.parse::<f64>().is_err()
+    {
+        return false;
     }
     true
 }

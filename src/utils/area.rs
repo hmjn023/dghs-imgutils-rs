@@ -15,6 +15,10 @@ use ndarray::{Array4, ArrayView4, s};
 /// * `batch_size` - バッチサイズ
 /// * `input_channels` - 入力チャンネル数
 /// * `output_channels` - 出力チャンネル数
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing public API and Python-compatible options"
+)]
 pub fn area_batch_run<F, E>(
     origin_input: &Array4<f32>,
     func: F,

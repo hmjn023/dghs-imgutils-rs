@@ -12,6 +12,6 @@ pub fn laplacian_score(image: &DynamicImage) -> f32 {
         return 0.0;
     }
     let mean = pixels.iter().sum::<f32>() / n;
-    let variance = pixels.iter().map(|&p| (p - mean).powi(2)).sum::<f32>() / n;
-    variance
+
+    pixels.iter().map(|&p| (p - mean).powi(2)).sum::<f32>() / n
 }

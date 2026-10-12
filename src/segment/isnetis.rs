@@ -6,12 +6,15 @@ use crate::inference::{InferenceError, SharedSession, get_or_create_session, loc
 use image::DynamicImage;
 use ndarray::Array4;
 
+/// Input tensor, original size, and resized width/height plus left/top padding.
+pub type IsnetisInput = (Array4<f32>, (u32, u32), (u32, u32, u32, u32));
+
 /// ISNetIS 用の画像前処理。
 /// アスペクト比を維持して scale 解像度の長辺に合わせ、黒背景キャンバスの中央にパディング配置します。
 pub fn preprocess_isnetis(
     image: &DynamicImage,
     scale: u32,
-) -> Result<(Array4<f32>, (u32, u32), (u32, u32, u32, u32)), InferenceError> {
+) -> Result<IsnetisInput, InferenceError> {
     let rgb_image = crate::image::force_image_background(image, [255, 255, 255]);
     let old_w = rgb_image.width();
     let old_h = rgb_image.height();

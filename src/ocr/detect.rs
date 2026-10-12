@@ -48,8 +48,8 @@ fn preprocess_det(image: &DynamicImage) -> Result<(Array4<f32>, u32, u32, f32, f
     );
 
     let align = 32u32;
-    let padded_w = ((new_w + align - 1) / align) * align;
-    let padded_h = ((new_h + align - 1) / align) * align;
+    let padded_w = new_w.div_ceil(align) * align;
+    let padded_h = new_h.div_ceil(align) * align;
 
     let mut rgb = resized.to_rgb8();
     if padded_w != new_w || padded_h != new_h {
@@ -85,7 +85,7 @@ fn extract_prob_map(
     let shape_usize: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
 
     let output_h = shape_usize.get(shape_usize.len() - 2).copied().unwrap_or(0);
-    let output_w = shape_usize.get(shape_usize.len() - 1).copied().unwrap_or(0);
+    let output_w = shape_usize.last().copied().unwrap_or(0);
 
     let stride_h = h as usize;
     let stride_w = w as usize;

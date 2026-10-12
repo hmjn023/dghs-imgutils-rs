@@ -179,10 +179,10 @@ impl WordPool {
 
     fn contains(&self, text: &str) -> bool {
         let words = split_to_words(text);
-        if let Some(set) = self.words.get(&words.len()) {
-            if set.contains(&words) {
-                return true;
-            }
+        if let Some(set) = self.words.get(&words.len())
+            && set.contains(&words)
+        {
+            return true;
         }
         false
     }
@@ -270,6 +270,12 @@ pub struct CharacterTagPool {
     whitelist_words: WordPool,
     suffixes: SuffixPool,
     prefixes: PrefixPool,
+}
+
+impl Default for CharacterTagPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CharacterTagPool {

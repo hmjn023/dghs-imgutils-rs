@@ -18,7 +18,7 @@ struct PreprocessorConfig {
 #[derive(Debug, Deserialize)]
 struct TagRecord {
     #[serde(rename = "tag_id")]
-    tag_id: usize,
+    _tag_id: usize,
     name: String,
     category: usize,
 }
@@ -86,10 +86,8 @@ fn apply_preprocessing(image: &DynamicImage, stages: &[serde_json::Value]) -> Ar
                                 let s = arr[0].as_u64().unwrap_or(448) as u32;
                                 Some((s, s))
                             }
-                        } else if let Some(n) = v.as_u64() {
-                            Some((n as u32, n as u32))
                         } else {
-                            None
+                            v.as_u64().map(|n| (n as u32, n as u32))
                         }
                     })
                     .unwrap_or((448, 448));
@@ -239,11 +237,9 @@ pub fn get_deepgelbooru_tags(
                     all_tags.push((record.name.clone(), prob));
                 }
             }
-            4 => {
-                if prob >= character_threshold {
-                    character.push((record.name.clone(), prob));
-                    all_tags.push((record.name.clone(), prob));
-                }
+            4 if prob >= character_threshold => {
+                character.push((record.name.clone(), prob));
+                all_tags.push((record.name.clone(), prob));
             }
             _ => {}
         }
