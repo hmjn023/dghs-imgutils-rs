@@ -214,11 +214,14 @@ fn top_down_affine(
     (warped, bbox_scale)
 }
 
+/// Per-person tensors, bounding-box centers, and corrected scales.
+type PoseInputs = (Vec<Array4<f32>>, Vec<[f32; 2]>, Vec<[f32; 2]>);
+
 fn preprocess_dwpose(
     img: &DynamicImage,
     out_bboxes: &[[f32; 4]],
     input_size: (u32, u32),
-) -> (Vec<Array4<f32>>, Vec<[f32; 2]>, Vec<[f32; 2]>) {
+) -> PoseInputs {
     let mut out_img = Vec::new();
     let mut out_center = Vec::new();
     let mut out_scale = Vec::new();

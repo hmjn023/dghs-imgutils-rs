@@ -156,6 +156,10 @@ fn draw_face(img: &mut image::RgbaImage, keypoints: &OP18KeyPointSet, threshold:
 ///
 /// # Returns
 /// RGBA image with visualized keypoints
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing public API and Python-compatible options"
+)]
 pub fn op18_visualize(
     image: &DynamicImage,
     keypoints_list: &[OP18KeyPointSet],

@@ -31,7 +31,7 @@ pub enum SqueezeError {
 ///
 /// # エラー
 /// マスクが全 false（前景なし）の場合は `SqueezeError::EmptyMask`
-pub fn squeeze(img: &DynamicImage, mask: &Vec<Vec<bool>>) -> Result<DynamicImage, SqueezeError> {
+pub fn squeeze(img: &DynamicImage, mask: &[Vec<bool>]) -> Result<DynamicImage, SqueezeError> {
     let (w, h) = img.dimensions();
     let rows = mask.len() as u32;
     let cols = if rows > 0 { mask[0].len() as u32 } else { 0 };
@@ -114,10 +114,10 @@ pub fn squeeze_with_transparency(
 
 /// 2D bool マスクにメディアンフィルタを適用します。
 /// ウィンドウ内の true の個数が過半数なら true、そうでなければ false。
-fn apply_median_filter(mask: &Vec<Vec<bool>>, size: usize) -> Vec<Vec<bool>> {
+fn apply_median_filter(mask: &[Vec<bool>], size: usize) -> Vec<Vec<bool>> {
     let h = mask.len();
     if h == 0 {
-        return mask.clone();
+        return mask.to_vec();
     }
     let w = mask[0].len();
     let half = size / 2;
@@ -125,8 +125,8 @@ fn apply_median_filter(mask: &Vec<Vec<bool>>, size: usize) -> Vec<Vec<bool>> {
 
     let mut result = vec![vec![false; w]; h];
 
-    for r in 0..h {
-        for c in 0..w {
+    for (r, row) in result.iter_mut().enumerate() {
+        for (c, value) in row.iter_mut().enumerate() {
             let mut count = 0usize;
             for dr in 0..size {
                 let rr = (r + dr).saturating_sub(half);
@@ -143,7 +143,7 @@ fn apply_median_filter(mask: &Vec<Vec<bool>>, size: usize) -> Vec<Vec<bool>> {
                     }
                 }
             }
-            result[r][c] = count > threshold;
+            *value = count > threshold;
         }
     }
 

@@ -6,8 +6,8 @@ use image::DynamicImage;
 use ndarray::{Array2, Array4};
 use once_cell::sync::Lazy;
 
-use crate::generic::GenericError;
 use crate::generic::clip::SimpleTokenizer;
+use crate::generic::{EncoderOutput, GenericError, PredictionOutput};
 use crate::hub::hf_hub_download;
 use crate::image::{force_image_background, to_ndarray_chw};
 use crate::inference::{get_or_create_session, lock_session};
@@ -81,7 +81,7 @@ pub fn siglip_image_encode(
     images: &[DynamicImage],
     repo_id: &str,
     model_name: &str,
-) -> Result<(Vec<Vec<f32>>, Vec<Vec<f32>>), GenericError> {
+) -> Result<EncoderOutput, GenericError> {
     let repo = if repo_id.is_empty() {
         DEFAULT_REPO_ID
     } else {
@@ -133,7 +133,7 @@ pub fn siglip_text_encode(
     texts: &[String],
     repo_id: &str,
     model_name: &str,
-) -> Result<(Vec<Vec<f32>>, Vec<Vec<f32>>), GenericError> {
+) -> Result<EncoderOutput, GenericError> {
     let repo = if repo_id.is_empty() {
         DEFAULT_REPO_ID
     } else {
@@ -201,7 +201,7 @@ pub fn siglip_predict(
     text_embeds: &[Vec<f32>],
     logit_scale: f32,
     logit_bias: f32,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>) {
+) -> PredictionOutput {
     let n_img = image_embeds.len();
     let n_txt = text_embeds.len();
     let mut similarities = vec![vec![0.0f32; n_txt]; n_img];

@@ -9,7 +9,7 @@
 //! use dghs_imgutils_rs::ascii::ascii_drawing;
 //!
 //! let img = image::open("input.jpg").unwrap();
-//! let aa = ascii_drawing(&img, "@%#*+=-:. ", Some(80));
+//! let aa = ascii_drawing(&img, "@%#*+=-:. ", Some(80)).unwrap();
 //! println!("{}", aa);
 //! ```
 

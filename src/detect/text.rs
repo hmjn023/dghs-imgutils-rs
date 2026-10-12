@@ -19,7 +19,7 @@ fn normalize_text_input(
     let rgb_img = img.to_rgb8();
 
     let mean = [0.48145466f32, 0.4578275f32, 0.40821073f32];
-    let std = [0.26862954f32, 0.26130258f32, 0.27577711f32];
+    let std = [0.26862954f32, 0.261_302_6_f32, 0.275_777_1_f32];
 
     for y in 0..orig_h {
         for x in 0..orig_w {

@@ -119,10 +119,11 @@ fn parse_parameters(param_text: &str) -> HashMap<String, String> {
         let mut value: String = cap["value"].trim().to_string();
 
         // JSON 引用符を外す
-        if value.starts_with('"') && value.ends_with('"') {
-            if let Ok(decoded) = serde_json::from_str::<String>(&value) {
-                value = decoded;
-            }
+        if value.starts_with('"')
+            && value.ends_with('"')
+            && let Ok(decoded) = serde_json::from_str::<String>(&value)
+        {
+            value = decoded;
         }
 
         // Size パターンマッチ

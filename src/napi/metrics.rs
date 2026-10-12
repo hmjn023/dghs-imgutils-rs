@@ -58,7 +58,7 @@ pub fn ccip_batch_extract_features(
 ) -> napi::Result<Vec<Vec<f64>>> {
     let images: Vec<image::DynamicImage> = paths
         .iter()
-        .map(|p| image::open(p))
+        .map(image::open)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             napi::Error::new(
@@ -182,7 +182,7 @@ pub fn lpips_clustering(
 ) -> napi::Result<Vec<i32>> {
     let images: Vec<image::DynamicImage> = paths
         .iter()
-        .map(|p| image::open(p))
+        .map(image::open)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             napi::Error::new(
@@ -199,7 +199,7 @@ pub fn lpips_clustering(
             )
         })
     })?;
-    Ok(clusters.into_iter().map(|v| v as i32).collect())
+    Ok(clusters)
 }
 
 #[cfg(test)]

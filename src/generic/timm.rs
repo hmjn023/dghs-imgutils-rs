@@ -23,8 +23,8 @@ struct TIMMEntry {
 struct PreprocessConfig {
     #[serde(default)]
     test: Vec<PreprocessStage>,
-    #[serde(default)]
-    val: Vec<PreprocessStage>,
+    #[serde(default, rename = "val")]
+    _val: Vec<PreprocessStage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,12 +68,12 @@ fn ensure_timm_model(repo_id: &str) -> Result<(), GenericError> {
             let content = std::fs::read_to_string(p)?;
             serde_json::from_str(&content).unwrap_or(PreprocessConfig {
                 test: vec![],
-                val: vec![],
+                _val: vec![],
             })
         }
         Err(_) => PreprocessConfig {
             test: vec![],
-            val: vec![],
+            _val: vec![],
         },
     };
 

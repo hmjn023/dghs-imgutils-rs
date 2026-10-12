@@ -6,6 +6,9 @@ use crate::inference::{InferenceError, get_or_create_session, lock_session, run_
 use image::DynamicImage;
 use ndarray::Array4;
 
+/// Input tensor, original image size, and resized image size for YOLO inference.
+pub type YoloImageInput = (Array4<f32>, (u32, u32), (u32, u32));
+
 /// YOLO 検出結果
 #[derive(Debug, Clone)]
 pub struct DetectionResult {
@@ -28,7 +31,7 @@ pub fn preprocess_image_yolo(
     max_infer_size: (u32, u32),
     allow_dynamic: bool,
     align: u32,
-) -> Result<(Array4<f32>, (u32, u32), (u32, u32)), InferenceError> {
+) -> Result<YoloImageInput, InferenceError> {
     let old_w = image.width();
     let old_h = image.height();
     let (mut new_w, mut new_h) = (old_w, old_h);

@@ -344,7 +344,10 @@ fn configure_session_builder(
         Backend::Auto => Err(InferenceError::InvalidInput(
             "automatic backend must be resolved before configuring a session".to_owned(),
         )),
-        Backend::Cpu => validate_provider_precision(Backend::Cpu, options.precision),
+        Backend::Cpu => {
+            validate_provider_precision(Backend::Cpu, options.precision)?;
+            configure_cpu(builder)
+        }
         Backend::AmdGpu => configure_amd_gpu(builder, options),
         Backend::AmdNpu => configure_amd_npu(builder, options, key),
         Backend::Cuda => configure_cuda(builder, options),
@@ -352,6 +355,24 @@ fn configure_session_builder(
         Backend::DirectMl => configure_directml(builder, options),
         Backend::OpenVino => configure_openvino(builder, options),
     }
+}
+
+/// Registers the MLAS CPU execution provider explicitly.
+///
+/// `SessionBuilder::new()` in `ort` enables automatic device selection by
+/// default. Merely validating the CPU precision therefore does not make a
+/// `Backend::Cpu` session CPU-only: an installed accelerator provider (for
+/// example OpenVINO) can still be selected by ONNX Runtime. Registering CPU
+/// here makes the public provider selection strict and prevents a CPU worker
+/// from entering an unrelated accelerator initialization path.
+fn configure_cpu(
+    builder: &mut ort::session::builder::SessionBuilder,
+) -> Result<(), InferenceError> {
+    register_strict_provider(
+        builder,
+        ort::ep::CPU::default().with_arena_allocator(true),
+        Backend::Cpu,
+    )
 }
 
 /// Creates a session after validating model deployment metadata.

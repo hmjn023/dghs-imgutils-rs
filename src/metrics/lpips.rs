@@ -132,7 +132,7 @@ pub fn lpips_clustering(
     let n = images.len();
     let feats: Vec<LpipsFeatures> = images
         .iter()
-        .map(|img| lpips_extract_feature(img))
+        .map(lpips_extract_feature)
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut diff_matrix = vec![vec![0.0f32; n]; n];

@@ -36,13 +36,40 @@ pub struct SessionKey {
 }
 
 impl SessionKey {
-    /// Creates a session identity from the canonical model path and worker options.
+    /// Creates a session identity from the model path and worker options.
+    /// Adjacent `<model>.onnx_data` weights participate in the hash, and their
+    /// snapshot directory is preserved when the graph itself is a symlink.
     pub fn from_path(
         path: impl AsRef<Path>,
         options: &SessionOptions,
     ) -> Result<Self, InferenceError> {
-        let model_path = fs::canonicalize(path.as_ref())?;
-        let model_sha256 = model_sha256(&model_path)?;
+        let path = path.as_ref();
+        let mut external_name = path.as_os_str().to_os_string();
+        external_name.push("_data");
+        let external_path = PathBuf::from(external_name);
+        let (model_path, model_sha256) = if external_path.is_file() {
+            // Hugging Face snapshots symlink each file to a separate blob. Resolving
+            // the graph symlink loses its adjacent `<model>.onnx_data` weights.
+            // Keep that directory and include the external weights in cache identity.
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let model_path = fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| {
+                InferenceError::Initialization("model path has no filename".to_owned())
+            })?);
+            let digest = Sha256::digest(format!(
+                "{}-{}",
+                model_sha256(path)?,
+                model_sha256(external_path)?
+            ));
+            let hash = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+            (model_path, hash)
+        } else {
+            let model_path = fs::canonicalize(path)?;
+            let hash = model_sha256(&model_path)?;
+            (model_path, hash)
+        };
 
         Ok(Self {
             model_path,
@@ -152,6 +179,37 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn external_weight_changes_invalidate_session_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = dir.path().join("model.onnx");
+        let weights = dir.path().join("model.onnx_data");
+        fs::write(&graph, b"graph").unwrap();
+        fs::write(&weights, b"first weights").unwrap();
+        let options = SessionOptions::default();
+        let first = SessionKey::from_path(&graph, &options).unwrap();
+        fs::write(&weights, b"different weights").unwrap();
+        let second = SessionKey::from_path(&graph, &options).unwrap();
+        assert_ne!(first.model_sha256, second.model_sha256);
+        assert_eq!(first.model_sha256.len(), 64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_weights_keep_hub_snapshot_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir.path().join("snapshot");
+        fs::create_dir(&snapshot).unwrap();
+        let blob = dir.path().join("graph-blob");
+        fs::write(&blob, b"graph").unwrap();
+        let graph = snapshot.join("model.onnx");
+        std::os::unix::fs::symlink(&blob, &graph).unwrap();
+        fs::write(snapshot.join("model.onnx_data"), b"weights").unwrap();
+        let key = SessionKey::from_path(&graph, &SessionOptions::default()).unwrap();
+        assert_eq!(key.model_path, graph);
+        assert_ne!(key.model_path, blob);
+    }
 
     #[test]
     fn model_hash_changes_when_model_bytes_change() {

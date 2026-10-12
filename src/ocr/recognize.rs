@@ -82,7 +82,7 @@ fn preprocess_rec(region: &DynamicImage) -> Result<Array4<f32>, OcrError> {
 
     let aspect_ratio = w as f32 / h as f32;
     let target_w = (REC_HEIGHT as f32 * aspect_ratio).round() as u32;
-    let target_w = target_w.max(4).min(REC_WIDTH);
+    let target_w = target_w.clamp(4, REC_WIDTH);
 
     let resized = region.resize_exact(target_w, REC_HEIGHT, image::imageops::FilterType::Triangle);
 
@@ -147,10 +147,11 @@ fn ctc_decode(shape: &[usize], data: &[f32], chars: &[String]) -> Result<String,
     let mut text = String::new();
     let mut prev = blank_idx;
     for &idx in &raw_indices {
-        if idx != blank_idx && idx != prev {
-            if let Some(ch) = chars.get(idx) {
-                text.push_str(ch);
-            }
+        if idx != blank_idx
+            && idx != prev
+            && let Some(ch) = chars.get(idx)
+        {
+            text.push_str(ch);
         }
         prev = idx;
     }

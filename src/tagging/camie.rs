@@ -16,12 +16,6 @@ struct PreprocessConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct ThresholdConfig {
-    #[serde(flatten)]
-    inner: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
 struct TagRecord {
     name: String,
     category: usize,
@@ -148,12 +142,11 @@ fn apply_preprocess_to_chw(image: &DynamicImage, stages: &[serde_json::Value]) -
 }
 
 fn get_threshold_value(config: &serde_json::Value, cate_name: &str, mode: &str) -> f32 {
-    if let Some(obj) = config.get(cate_name) {
-        if let Some(mode_obj) = obj.get(mode) {
-            if let Some(th) = mode_obj.get("threshold").and_then(|v| v.as_f64()) {
-                return th as f32;
-            }
-        }
+    if let Some(obj) = config.get(cate_name)
+        && let Some(mode_obj) = obj.get(mode)
+        && let Some(th) = mode_obj.get("threshold").and_then(|v| v.as_f64())
+    {
+        return th as f32;
     }
     match cate_name {
         "rating" => 0.0,

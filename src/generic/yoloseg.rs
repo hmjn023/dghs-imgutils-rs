@@ -3,7 +3,6 @@ use std::sync::Mutex;
 
 use image::DynamicImage;
 use image::imageops::FilterType;
-use ndarray::Array4;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 
@@ -90,7 +89,7 @@ fn ensure_yoloseg_model(repo_id: &str, model_name: &str) -> Result<(), GenericEr
 fn preprocess_yoloseg(
     image: &DynamicImage,
     max_infer_size: u32,
-) -> Result<(Array4<f32>, (u32, u32), (u32, u32)), GenericError> {
+) -> Result<crate::inference::yolo::YoloImageInput, GenericError> {
     let old_w = image.width();
     let old_h = image.height();
     let new_w = max_infer_size;
@@ -292,7 +291,7 @@ pub fn yolo_seg_predict(
 
         // Decode mask: mask_embedding @ protos.reshape(pe, ph*pw) -> reshape(ph, pw)
         let mask_emb = ndarray::ArrayView1::from(&mask_embs[idx]);
-        let protos_flat = protos.view().into_shape((pe, ph * pw))?;
+        let protos_flat = protos.view().into_shape_with_order((pe, ph * pw))?;
         let mask_flat = mask_emb.dot(&protos_flat);
         let mut mask = mask_flat.into_shape_with_order((ph, pw))?;
 
