@@ -496,6 +496,12 @@ model/backend/precision/deviceごとに分離されるため、元の設定へ�
 sessionを再利用できます。処理中の呼び出しは開始時に選択したsessionを使い続け、
 UIの変更は新しい呼び出しにだけ反映されます。
 
+sessionの構築は、明示的なキャッシュなしの作成も含め、プロセス内で1件ずつ実行します。
+同じキャッシュ対象モデルへの同時呼び出しは初期化結果を共有し、graphを重複compileしません。
+別モデルのcompile中もキャッシュ済みsessionは利用できます。初期化の失敗後は再試行でき、
+session cacheのクリアは実行中の初期化を待ってからentryを削除します。この制限は同時compileを
+抑えるもので、単一モデルの必要メモリや常駐モデル数の上限ではありません。
+
 Intel OpenVINOを使う場合は、Rustでは`DeviceProvider::IntelGpu`または
 `DeviceProvider::IntelNpu`、TypeScriptでは`provider: 'intel_gpu'`または
 `provider: 'intel_npu'`を指定します。特定deviceを選ぶ場合だけ任意の`device: '0'`

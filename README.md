@@ -523,6 +523,14 @@ model APIs. Sessions are cached separately by model/backend/precision/device,
 so switching back can reuse a warm session. A request already in progress keeps
 the session it selected; changing the UI selection affects new calls only.
 
+Session construction is limited to one model at a time per process, including
+explicit uncached session creation. Concurrent requests for the same cached
+model share one initialization instead of compiling duplicate graphs. Already
+cached models remain available during another model's compilation. Failed
+initializations can be retried; clearing the session cache waits for any current
+initialization before removing entries. This bounds simultaneous compilation,
+not the memory needed by an individual model or the number of resident models.
+
 For Intel OpenVINO, use `DeviceProvider::IntelGpu` or
 `DeviceProvider::IntelNpu` in Rust, and `provider: 'intel_gpu'` or
 `provider: 'intel_npu'` in TypeScript. Add an optional `device: '0'` (or
