@@ -5,6 +5,7 @@ pub mod classify;
 pub mod error;
 mod runtime;
 pub mod session;
+mod session_cache;
 pub mod yolo;
 
 pub use backend::{
@@ -23,7 +24,6 @@ use once_cell::sync::Lazy;
 use ort::ep::{ExecutionProvider, ExecutionProviderDispatch};
 use ort::session::Session;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -61,8 +61,8 @@ fn is_explicit_openvino_device(device_type: &str) -> bool {
 /// The key includes model content, backend, precision, device, runtime, and
 /// provider fingerprints, so replacing an ONNX file or runtime cannot reuse a
 /// stale compiled session.
-static SESSION_CACHE: Lazy<Mutex<HashMap<SessionKey, Arc<Mutex<Session>>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static SESSION_CACHE: Lazy<session_cache::SessionCache<Session>> =
+    Lazy::new(session_cache::SessionCache::new);
 
 /// Programmatic worker configuration used by the legacy high-level APIs.
 ///
@@ -204,13 +204,16 @@ pub fn create_onnx_session<P: AsRef<Path>>(model_path: P) -> Result<Session, Inf
 }
 
 /// Creates a session with an explicit worker/backend policy.
+///
+/// Construction is serialized with cached session initialization to bound
+/// concurrent provider compilation memory, even for uncached callers.
 pub fn create_onnx_session_with_options<P: AsRef<Path>>(
     model_path: P,
     options: &SessionOptions,
 ) -> Result<Session, InferenceError> {
     init_onnx_runtime()?;
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
-    create_onnx_session_from_key(&key, options)
+    SESSION_CACHE.initialize(|| create_onnx_session_from_key(&key, options))
 }
 
 fn create_onnx_session_from_key(
@@ -698,6 +701,9 @@ pub fn get_or_create_session<P: AsRef<Path>>(
 }
 
 /// Returns a cached session using an explicit worker/backend policy.
+///
+/// Concurrent requests for the same key share one initialization. Different
+/// models also compile one at a time; already cached sessions remain available.
 pub fn get_or_create_session_with_options<P: AsRef<Path>>(
     model_path: P,
     options: &SessionOptions,
@@ -705,42 +711,7 @@ pub fn get_or_create_session_with_options<P: AsRef<Path>>(
     init_onnx_runtime()?;
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
 
-    {
-        let mut cache = SESSION_CACHE.lock().map_err(|e| {
-            InferenceError::Initialization(format!("Session cache lock poisoned: {e}"))
-        })?;
-
-        if let Some(session) = cache.get(&key) {
-            return Ok(Arc::clone(session));
-        }
-
-        // A model path can be replaced in place by a downloader or deployment
-        // tool. Drop stale entries for that path after the content hash changes;
-        // callers holding an old Arc may finish using it, but new lookups cannot
-        // retain an obsolete compiled graph indefinitely.
-        if cache.keys().any(|cached| {
-            cached.model_path == key.model_path && cached.model_sha256 != key.model_sha256
-        }) {
-            cache.retain(|cached, _| {
-                cached.model_path != key.model_path || cached.model_sha256 == key.model_sha256
-            });
-        }
-    }
-
-    // Compilation can take seconds or minutes for provider-backed sessions.
-    // Do not hold the global cache mutex while ONNX Runtime compiles the graph.
-    let created_session = Arc::new(Mutex::new(create_onnx_session_from_key(&key, options)?));
-
-    let mut cache = SESSION_CACHE
-        .lock()
-        .map_err(|e| InferenceError::Initialization(format!("Session cache lock poisoned: {e}")))?;
-    if let Some(session) = cache.get(&key) {
-        // Another thread may have compiled and inserted the same key while this
-        // thread was compiling. Reuse the canonical entry in that case.
-        return Ok(Arc::clone(session));
-    }
-    cache.insert(key, Arc::clone(&created_session));
-    Ok(created_session)
+    SESSION_CACHE.get_or_try_init(key.clone(), || create_onnx_session_from_key(&key, options))
 }
 
 /// Returns a cached session after validating model deployment metadata.
@@ -753,13 +724,10 @@ pub fn get_or_create_session_with_manifest<P: AsRef<Path>>(
     get_or_create_session_with_options(model_path, &effective_options)
 }
 
-/// Clears all worker-local cached sessions.
+/// Clears all worker-local cached sessions after any current initialization.
+/// Existing session handles remain usable by their callers.
 pub fn clear_session_cache() -> Result<(), InferenceError> {
-    SESSION_CACHE
-        .lock()
-        .map_err(|e| InferenceError::Initialization(format!("Session cache lock poisoned: {e}")))?
-        .clear();
-    Ok(())
+    SESSION_CACHE.clear()
 }
 
 /// Locks a shared session and normalizes poisoned-lock errors.
