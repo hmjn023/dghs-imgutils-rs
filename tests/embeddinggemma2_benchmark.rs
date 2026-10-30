@@ -127,3 +127,46 @@ fn embeddinggemma2_python_rust_parity() {
         );
     });
 }
+
+/// Opt-in GPU regression: compares actual model outputs, including the input
+/// that produced all-zero vectors with the OpenVINO GPU default precision.
+#[cfg(feature = "openvino")]
+#[test]
+#[ignore = "requires cached EmbeddingGemma 2 model and Intel GPU"]
+fn embeddinggemma2_openvino_gpu_matches_cpu() {
+    use dghs_imgutils_rs::inference::Precision;
+    let options = EmbeddingGemma2Options {
+        max_soft_tokens: 70,
+        ..Default::default()
+    };
+    let texts = vec!["cat".to_string(), "赤い服を着たキャラクター".to_string()];
+    let image = DynamicImage::ImageRgba8(RgbaImage::from_fn(181, 97, |x, y| {
+        Rgba([
+            (x * 7 % 256) as u8,
+            (y * 3 % 256) as u8,
+            ((x + y) % 256) as u8,
+            255,
+        ])
+    }));
+    let run = |session: SessionOptions| {
+        with_inference_options(session, || {
+            let text = embeddinggemma2_text_encode(&texts, EmbeddingGemma2TextTask::Raw, &options)
+                .unwrap();
+            let images =
+                embeddinggemma2_image_encode(std::slice::from_ref(&image), &options).unwrap();
+            (text, images)
+        })
+    };
+    let cpu = run(SessionOptions::for_backend(Backend::Cpu));
+    for precision in [Precision::Auto, Precision::Fp32] {
+        let gpu = run(SessionOptions::for_backend(Backend::OpenVino)
+            .with_openvino_device_type("GPU")
+            .with_precision(precision));
+        for (a, b) in gpu.0.iter().zip(&cpu.0) {
+            assert_embedding(a, b, 0.99);
+        }
+        for (a, b) in gpu.1.iter().zip(&cpu.1) {
+            assert_embedding(a, b, 0.99);
+        }
+    }
+}

@@ -809,6 +809,8 @@ cargo doc --open
 
 This project is a Rust port of the Python library [dghs-imgutils](https://github.com/deepghs/imgutils). The Python source code is included in the `imgutils/` directory as a read-only reference.
 
+OpenVINO `precision: auto` uses accuracy mode. Explicit `fp32` and `fp16` are forwarded to OpenVINO; supported precision depends on the device. Accuracy mode may reduce throughput.
+
 ## License
 
 Apache License 2.0

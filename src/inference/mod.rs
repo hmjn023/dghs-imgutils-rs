@@ -431,6 +431,18 @@ fn validate_provider_precision(
     )))
 }
 
+#[cfg(feature = "openvino")]
+fn openvino_precision(precision: Precision) -> Result<&'static str, InferenceError> {
+    match precision {
+        Precision::Auto => Ok("ACCURACY"),
+        Precision::Fp32 => Ok("FP32"),
+        Precision::Fp16 => Ok("FP16"),
+        other => Err(InferenceError::ModelUnsupported(format!(
+            "OpenVINO does not support explicit {other} precision"
+        ))),
+    }
+}
+
 fn configure_amd_gpu(
     builder: &mut ort::session::builder::SessionBuilder,
     options: &SessionOptions,
@@ -612,7 +624,7 @@ fn configure_openvino(
 ) -> Result<(), InferenceError> {
     #[cfg(feature = "openvino")]
     {
-        validate_provider_precision(Backend::OpenVino, options.precision)?;
+        let precision = openvino_precision(options.precision)?;
         let device_type = options
             .openvino_device_type
             .clone()
@@ -624,7 +636,9 @@ fn configure_openvino(
             ))
         })?;
         runtime::prepare_openvino_device(&device_type);
-        let provider = ort::ep::OpenVINO::default().with_device_type(&device_type);
+        let provider = ort::ep::OpenVINO::default()
+            .with_device_type(&device_type)
+            .with_precision(precision);
         let detected_devices = runtime::detected_intel_device_summary();
         register_strict_provider(builder, provider, Backend::OpenVino).map_err(|error| {
             InferenceError::BackendUnavailable(format!(

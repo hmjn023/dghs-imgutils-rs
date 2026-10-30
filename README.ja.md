@@ -756,6 +756,8 @@ cargo doc --open
 
 本プロジェクトは Python ライブラリ [dghs-imgutils](https://github.com/deepghs/imgutils) の Rust 移植版です。Python のソースコードは `imgutils/` ディレクトリに読み取り専用の参照として含まれています。
 
+OpenVINO の `precision: auto` は精度優先モードです。明示した `fp32` と `fp16` は OpenVINO に渡され、利用可能な精度はデバイスに依存します。精度優先モードでは処理速度が低下する場合があります。
+
 ## ライセンス
 
 Apache License 2.0
