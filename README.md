@@ -39,8 +39,19 @@ dghs-imgutils-rs = "0.3.0"
 ### Node.js / TypeScript
 
 ```bash
-npm install dghs-imgutils-rs
+npm install github:hmjn023/dghs-imgutils-rs#vX.Y.Z
 ```
+
+Replace `vX.Y.Z` with a published release tag. Installation downloads the
+matching prebuilt addon and verifies its SHA-256 checksum; Rust is not needed.
+Prebuilt targets are Linux x64 (glibc), Windows x64, and macOS x64/arm64.
+Node.js 18 or newer and access to GitHub Releases are required. The ONNX
+Runtime setup described below is still required for inference.
+
+For a new release, update the version in `package.json` (and `Cargo.toml` and
+`Cargo.lock` when releasing the Rust crate). A push to `main` builds all four
+targets. Once all builds pass, a new package version gets a matching `v` tag
+and GitHub Release. Wait for the release to be published before installing it.
 
 ## Quick Start
 
@@ -240,7 +251,7 @@ export HF_HOME="$PWD/.cache/huggingface"
 export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
 cargo test --lib --no-default-features
-npm install
+npm install --ignore-scripts
 npm run build
 ```
 

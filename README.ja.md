@@ -39,8 +39,19 @@ dghs-imgutils-rs = "0.3.0"
 ### Node.js / TypeScript
 
 ```bash
-npm install dghs-imgutils-rs
+npm install github:hmjn023/dghs-imgutils-rs#vX.Y.Z
 ```
+
+`vX.Y.Z` は公開済みのリリースタグに置き換えてください。インストール時に
+対応するビルド済みアドオンを取得し、SHA-256 を検証するため、Rust は不要です。
+対応環境は Linux x64（glibc）、Windows x64、macOS x64 / arm64 です。
+Node.js 18 以降と GitHub Releases へのアクセスが必要です。推論には、後述する
+ONNX Runtime のセットアップが引き続き必要です。
+
+リリース時は `package.json` のバージョンを変更してください（Rust クレートも
+リリースする場合は `Cargo.toml` と `Cargo.lock` も更新）。`main` への push 時に
+４環境でビルドし、すべて成功すると、新しいバージョンに対応する `v` タグと
+GitHub Release が作成されます。インストールは Release の公開完了後に行ってください。
 
 ## クイックスタート
 
@@ -237,7 +248,7 @@ export HF_HOME="$PWD/.cache/huggingface"
 export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
 cargo test --lib --no-default-features
-npm install
+npm install --ignore-scripts
 npm run build
 ```
 

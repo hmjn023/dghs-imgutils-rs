@@ -1,6 +1,6 @@
 {
   "name": "dghs-imgutils-rs",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
@@ -18,12 +18,11 @@
   "scripts": {
     "build": "node scripts/build-native.mjs --release",
     "build:debug": "node scripts/build-native.mjs",
-    "postinstall": "node scripts/build-native.mjs --release"
+    "postinstall": "node scripts/install-native.mjs"
   },
-  "dependencies": {
-    "@napi-rs/cli": "^2.18.4"
-  },
+  "engines": { "node": ">=18" },
   "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
     "typescript": "^5.4.5"
   }
 }
