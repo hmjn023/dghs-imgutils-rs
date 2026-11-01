@@ -86,8 +86,8 @@ jobs:
           else
             gh release create "$tag" --target "$GITHUB_SHA" --draft --title "$tag" --generate-notes
           fi
-          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)
-          [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Draft tag $tag points to another commit"; exit 1; }
+          target_sha=$(gh release view "$tag" --json targetCommitish --jq .targetCommitish)
+          [[ "$target_sha" == "$GITHUB_SHA" ]] || { echo "Draft release $tag points to another commit"; exit 1; }
           (cd release-assets && sha256sum index.js index.d.ts dghs-imgutils-rs.*.node > SHA256SUMS)
           gh release upload "$tag" release-assets/* --clobber
           gh release edit "$tag" --draft=false
