@@ -169,6 +169,47 @@ DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/export \
 同一のQ8 ONNXモデルを使い、トークナイズとPillow画像前処理のRustとの差を検証します。
 元のPyTorchモデルとONNX変換結果の精度比較ではありません。
 
+#### Intel GPU 用の Q8 モデル準備
+
+ORT 1.29 の OpenVINO プロバイダーでは、公開 Q8 グラフの Attention などが
+CPU に割り当てられます。専用エクスポートを準備すると、画像エンコーダーと
+共有モデルの全グラフを OpenVINO GPU で実行できます。
+Linux の Intel Arc、ORT 1.29.0、OpenVINO 2026.4.1 で検証しています。
+
+```bash
+uv run scripts/prepare-embeddinggemma2-openvino.py \
+  /path/to/q8-export /path/to/embeddinggemma2-openvino
+```
+
+入力にはダウンロード済みの Q8 エクスポートや Hugging Face の snapshot ディレクトリを
+指定できます。出力先は新規ディレクトリを指定します。準備時に `uv` が Python 依存を用意し、
+約 550 MB のファイルを生成します。スクリプトは検証済みグラフの SHA-256 を照合します。
+共有モデルの RoPE 位置列を明示し、FP32 を維持して OpenVINO IR と ONNX ラッパーを作ります。
+推論時は生成したディレクトリを `modelDir` に指定します。
+
+```typescript
+import {
+  embeddinggemma2ImageEncode, embeddinggemma2TextEncode, NapiInferenceProvider,
+} from 'dghs-imgutils-rs';
+
+const options = { dtype: 'q8', modelDir: '/path/to/embeddinggemma2-openvino' };
+const inference = { provider: NapiInferenceProvider.IntelGpu, precision: 'fp32' };
+const [query] = embeddinggemma2TextEncode(['赤い服を着たキャラクター'], 'SearchQuery', options, inference);
+const images = embeddinggemma2ImageEncode(['./character_a.jpg'], options, inference);
+```
+
+`onnx/*.openvino.onnx` と同名の `.xml`・`.bin` を一緒に保持してください。
+この経路は ORT の CPU フォールバックを禁止し、GPU で初期化できなければエラーにします。
+画像の読み込み・前処理や GPU ドライバー処理では CPU を使います。
+元のエクスポートと準備済みモデルを比較する回帰テストも実行できます。
+
+```bash
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/q8-export \
+DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR=/path/to/embeddinggemma2-openvino \
+  cargo test --no-default-features --features openvino --test embeddinggemma2_benchmark \
+  embeddinggemma2_openvino_gpu_matches_cpu -- --ignored --nocapture
+```
+
 ## サポートされているモデル
 
 モデルは初回使用時に [HuggingFace Hub](https://huggingface.co/) から自動的にダウンロードされ、ローカルにキャッシュされます。

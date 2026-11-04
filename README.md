@@ -173,6 +173,49 @@ The parity check requires `uv` and an installed ONNX Runtime (use
 preprocessing against Rust using the same Q8 export, not export accuracy
 against the original PyTorch model.
 
+#### Preparing Q8 models for Intel GPU
+
+The OpenVINO provider in ORT 1.29 assigns some operators in the published Q8
+graphs, including vision attention, to CPU. A prepared export runs both complete
+encoder graphs through OpenVINO GPU. This path has been verified on Linux with
+Intel Arc, ORT 1.29.0, and OpenVINO 2026.4.1.
+
+```bash
+uv run scripts/prepare-embeddinggemma2-openvino.py \
+  /path/to/q8-export /path/to/embeddinggemma2-openvino
+```
+
+The source can be a downloaded Q8 export or a Hugging Face snapshot directory.
+Choose a new output directory. The one-time preparation uses `uv` to provide
+Python dependencies and writes about 550 MB. It verifies the tested graphs'
+SHA-256 hashes, makes the shared model's RoPE positions explicit, and preserves
+FP32 while producing OpenVINO IR and ONNX wrappers. Select this output with
+`modelDir` at inference time.
+
+```typescript
+import {
+  embeddinggemma2ImageEncode, embeddinggemma2TextEncode, NapiInferenceProvider,
+} from 'dghs-imgutils-rs';
+
+const options = { dtype: 'q8', modelDir: '/path/to/embeddinggemma2-openvino' };
+const inference = { provider: NapiInferenceProvider.IntelGpu, precision: 'fp32' };
+const [query] = embeddinggemma2TextEncode(['a character wearing red'], 'SearchQuery', options, inference);
+const images = embeddinggemma2ImageEncode(['./character_a.jpg'], options, inference);
+```
+
+Keep each `onnx/*.openvino.onnx` with its same-stem `.xml` and `.bin` files.
+This path disables ORT CPU fallback and reports an error if GPU initialization
+fails. Image decoding, preprocessing, and GPU driver work still use the CPU.
+Run the public-API regression against the original CPU export with the following
+environment variables.
+
+```bash
+DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/q8-export \
+DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR=/path/to/embeddinggemma2-openvino \
+  cargo test --no-default-features --features openvino --test embeddinggemma2_benchmark \
+  embeddinggemma2_openvino_gpu_matches_cpu -- --ignored --nocapture
+```
+
 ## Supported Models
 
 Models are automatically downloaded from [HuggingFace Hub](https://huggingface.co/) on first use and cached locally.

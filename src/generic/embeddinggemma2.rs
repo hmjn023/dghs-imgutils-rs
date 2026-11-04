@@ -15,7 +15,10 @@ use tokenizers::Tokenizer;
 
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
-use crate::inference::{get_or_create_session, lock_session, model_sha256};
+use crate::inference::{
+    SharedSession, current_inference_options, get_or_create_openvino_ir_session,
+    get_or_create_session, lock_session, model_sha256,
+};
 
 /// Public ONNX export, including tokenizer and external weight files.
 pub const REPO_ID: &str = "onnx-community/embeddinggemma-2-ONNX";
@@ -113,6 +116,7 @@ impl EmbeddingGemma2TextTask {
 pub struct EmbeddingGemma2Options {
     /// Local export root containing `tokenizer.json` and `onnx/`. When absent,
     /// required files are downloaded from [`REPO_ID`] into the HF cache.
+    /// Prepared `.openvino.onnx` exports require an explicit OpenVINO GPU.
     pub model_dir: Option<PathBuf>,
     /// ONNX weight format, independent of the execution provider's precision.
     pub dtype: EmbeddingGemma2Dtype,
@@ -161,6 +165,20 @@ impl EmbeddingGemma2Options {
 
     fn model(&self, component: &str) -> Result<PathBuf, GenericError> {
         let name = format!("onnx/{component}{}.onnx", self.dtype.suffix());
+        if let Some(root) = &self.model_dir {
+            let original = root.join(&name);
+            let prepared = original.with_extension("openvino.onnx");
+            if prepared.is_file() {
+                if current_inference_options()?.targets_openvino_gpu() {
+                    return Ok(prepared);
+                }
+                if !original.is_file() {
+                    return Err(invalid(
+                        "this EmbeddingGemma 2 export requires the intel_gpu provider; use the original ONNX export for other devices",
+                    ));
+                }
+            }
+        }
         let path = self.asset(&name)?;
         // All published graphs store their weights in an adjacent external file.
         let weights = self.asset(&format!("{name}_data"))?;
@@ -242,6 +260,14 @@ fn tokenize(tokenizer: &Tokenizer, text: &str) -> Result<Vec<i64>, GenericError>
     Ok(encoding.get_ids().iter().map(|&id| i64::from(id)).collect())
 }
 
+fn model_session(path: &Path) -> Result<SharedSession, GenericError> {
+    if crate::inference::session::is_openvino_ir_wrapper(path) {
+        Ok(get_or_create_openvino_ir_session(path)?)
+    } else {
+        Ok(get_or_create_session(path)?)
+    }
+}
+
 /// Encode texts into normalized embeddings, preserving input order.
 ///
 /// Items are evaluated individually to bound attention memory. Empty batches
@@ -303,7 +329,7 @@ pub fn embeddinggemma2_image_encode(
         .iter()
         .map(|image| {
             let (pixels, positions, count) = preprocess_image(image, options.max_soft_tokens)?;
-            let session = get_or_create_session(&vision)?;
+            let session = model_session(&vision)?;
             let mut session = lock_session(&session)?;
             let outputs = session.run(ort::inputs![
                 "pixel_values" => ort::value::Tensor::from_array(pixels)?,
@@ -346,7 +372,7 @@ fn encode(
 ) -> Result<Vec<f32>, GenericError> {
     let mask = Array2::<i64>::ones((1, ids.len()));
     let input = Array2::from_shape_vec((1, ids.len()), ids)?;
-    let session = get_or_create_session(model)?;
+    let session = model_session(model)?;
     let mut session = lock_session(&session)?;
     let outputs = session.run(ort::inputs![
         "input_ids" => ort::value::Tensor::from_array(input)?,
@@ -448,6 +474,49 @@ fn invalid(message: impl Into<String>) -> GenericError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::{Backend, SessionOptions, with_inference_options};
+
+    #[test]
+    fn prepared_models_require_an_explicit_intel_gpu() {
+        let root = tempfile::tempdir().unwrap();
+        let onnx = root.path().join("onnx");
+        std::fs::create_dir(&onnx).unwrap();
+        let original = onnx.join("model_quantized.onnx");
+        let prepared = onnx.join("model_quantized.openvino.onnx");
+        std::fs::write(&prepared, b"wrapper").unwrap();
+        let options = EmbeddingGemma2Options {
+            model_dir: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        for backend in [Backend::Auto, Backend::OpenVino] {
+            for device in ["GPU", "GPU.0"] {
+                let selected = with_inference_options(
+                    SessionOptions::for_backend(backend).with_openvino_device_type(device),
+                    || options.model("model").unwrap(),
+                );
+                assert_eq!(selected, prepared);
+            }
+        }
+        for (backend, device) in [
+            (Backend::Cpu, "GPU"),
+            (Backend::Cuda, "GPU"),
+            (Backend::OpenVino, "CPU"),
+            (Backend::OpenVino, "AUTO:GPU,CPU"),
+            (Backend::Auto, "HETERO:GPU,CPU"),
+        ] {
+            let session = SessionOptions::for_backend(backend).with_openvino_device_type(device);
+            assert!(with_inference_options(session, || options.model("model")).is_err());
+        }
+        // When both exports coexist, ordinary providers select the original.
+        std::fs::write(&original, b"onnx").unwrap();
+        std::fs::write(onnx.join("model_quantized.onnx_data"), b"weights").unwrap();
+        for backend in [Backend::Cpu, Backend::Cuda] {
+            let selected = with_inference_options(SessionOptions::for_backend(backend), || {
+                options.model("model").unwrap()
+            });
+            assert_eq!(selected, original);
+        }
+    }
 
     #[test]
     fn external_weight_staging_is_reusable_and_content_addressed() {
