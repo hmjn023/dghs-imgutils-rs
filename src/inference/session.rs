@@ -35,6 +35,12 @@ pub struct SessionKey {
     pub provider_fingerprint: String,
 }
 
+/// Recognizes prepared OpenVINO EPContext wrappers with adjacent XML and BIN files.
+pub(crate) fn is_openvino_ir_wrapper(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.as_encoded_bytes().ends_with(b".openvino.onnx"))
+}
+
 impl SessionKey {
     /// Creates a session identity from the model path and worker options.
     /// Adjacent `<model>.onnx_data` weights participate in the hash, and their
@@ -46,34 +52,59 @@ impl SessionKey {
         let path = path.as_ref();
         let mut external_name = path.as_os_str().to_os_string();
         external_name.push("_data");
-        let external_path = PathBuf::from(external_name);
-        let (model_path, model_sha256) = if external_path.is_file() {
-            // Hugging Face snapshots symlink each file to a separate blob. Resolving
-            // the graph symlink loses its adjacent `<model>.onnx_data` weights.
-            // Keep that directory and include the external weights in cache identity.
+        let weights = PathBuf::from(external_name);
+        if weights.is_file() {
+            Self::from_model_files(path, options, &[weights])
+        } else {
+            Self::from_model_files(path, options, &[])
+        }
+    }
+
+    /// Hashes a prepared OpenVINO wrapper with its required XML and BIN companions.
+    pub(crate) fn from_openvino_ir(
+        path: &Path,
+        options: &SessionOptions,
+    ) -> Result<Self, InferenceError> {
+        Self::from_model_files(
+            path,
+            options,
+            &[path.with_extension("xml"), path.with_extension("bin")],
+        )
+    }
+
+    fn from_model_files(
+        path: &Path,
+        options: &SessionOptions,
+        companions: &[PathBuf],
+    ) -> Result<Self, InferenceError> {
+        let mut hash = model_sha256(path)?;
+        let model_path = if companions.is_empty() {
+            fs::canonicalize(path)?
+        } else {
+            for file in companions {
+                hash.push('-');
+                hash.push_str(&model_sha256(file).map_err(|error| {
+                    InferenceError::Initialization(format!(
+                        "cannot hash model companion {}: {error}",
+                        file.display()
+                    ))
+                })?);
+            }
+            hash = format!("{:x}", Sha256::digest(hash.as_bytes()));
+            // Resolve the directory only. The graph and its companions can each
+            // be symlinks to separate blobs in a Hugging Face snapshot.
             let parent = path
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or(Path::new("."));
-            let model_path = fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| {
+            fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| {
                 InferenceError::Initialization("model path has no filename".to_owned())
-            })?);
-            let digest = Sha256::digest(format!(
-                "{}-{}",
-                model_sha256(path)?,
-                model_sha256(external_path)?
-            ));
-            let hash = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-            (model_path, hash)
-        } else {
-            let model_path = fs::canonicalize(path)?;
-            let hash = model_sha256(&model_path)?;
-            (model_path, hash)
+            })?)
         };
 
         Ok(Self {
             model_path,
-            model_sha256,
+            model_sha256: hash,
             backend: options.backend,
             precision: options.precision,
             device_id: options.device_id,
@@ -181,6 +212,51 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
+    fn openvino_ir_companions_are_required_and_invalidate_session_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = dir.path().join("model.openvino.onnx");
+        let xml = graph.with_extension("xml");
+        let bin = graph.with_extension("bin");
+        fs::write(&graph, b"wrapper").unwrap();
+        let options = SessionOptions::default();
+        let key = || SessionKey::from_openvino_ir(&graph, &options);
+        assert!(
+            key()
+                .unwrap_err()
+                .to_string()
+                .contains("model.openvino.xml")
+        );
+        fs::write(&xml, b"xml").unwrap();
+        assert!(
+            key()
+                .unwrap_err()
+                .to_string()
+                .contains("model.openvino.bin")
+        );
+        fs::write(&bin, b"weights").unwrap();
+        let first = key().unwrap();
+        fs::write(&xml, b"new xml").unwrap();
+        let second = key().unwrap();
+        assert_ne!(first.model_sha256, second.model_sha256);
+        fs::write(&bin, b"new weights").unwrap();
+        assert_ne!(second.model_sha256, key().unwrap().model_sha256);
+    }
+
+    #[test]
+    fn ordinary_graphs_ignore_adjacent_openvino_ir_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = dir.path().join("model.openvino.onnx");
+        fs::write(&graph, b"graph").unwrap();
+        let options = SessionOptions::default();
+        let original = SessionKey::from_path(&graph, &options).unwrap();
+        fs::write(graph.with_extension("xml"), b"unrelated xml").unwrap();
+        fs::write(graph.with_extension("bin"), b"unrelated weights").unwrap();
+        let key = SessionKey::from_path(&graph, &options).unwrap();
+        assert_eq!(key, original);
+        assert_eq!(key.model_sha256, model_sha256(&graph).unwrap());
+    }
+
+    #[test]
     fn external_weight_changes_invalidate_session_identity() {
         let dir = tempfile::tempdir().unwrap();
         let graph = dir.path().join("model.onnx");
@@ -189,6 +265,15 @@ mod tests {
         fs::write(&weights, b"first weights").unwrap();
         let options = SessionOptions::default();
         let first = SessionKey::from_path(&graph, &options).unwrap();
+        let legacy_hash = format!(
+            "{:x}",
+            Sha256::digest(format!(
+                "{}-{}",
+                model_sha256(&graph).unwrap(),
+                model_sha256(&weights).unwrap()
+            ))
+        );
+        assert_eq!(first.model_sha256, legacy_hash);
         fs::write(&weights, b"different weights").unwrap();
         let second = SessionKey::from_path(&graph, &options).unwrap();
         assert_ne!(first.model_sha256, second.model_sha256);

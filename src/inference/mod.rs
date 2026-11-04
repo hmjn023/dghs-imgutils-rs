@@ -45,6 +45,25 @@ pub fn openvino_device_type() -> String {
         .unwrap_or_else(runtime::default_openvino_device)
 }
 
+impl SessionOptions {
+    fn effective_openvino_device_type(&self) -> String {
+        self.openvino_device_type
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(openvino_device_type)
+    }
+
+    /// Whether the selected provider policy explicitly targets an Intel GPU.
+    pub(crate) fn targets_openvino_gpu(&self) -> bool {
+        if !matches!(self.backend, Backend::OpenVino | Backend::Auto) {
+            return false;
+        }
+        let device = self.effective_openvino_device_type();
+        let device = device.trim().to_ascii_uppercase();
+        device == "GPU" || device.starts_with("GPU.")
+    }
+}
+
 #[cfg(any(feature = "openvino", test))]
 fn is_explicit_openvino_device(device_type: &str) -> bool {
     let device_type = device_type.trim().to_ascii_uppercase();
@@ -227,7 +246,7 @@ fn create_onnx_session_from_key(
             validate_provider_precision(Backend::Auto, options.precision)?;
             create_automatic_session(key, options)
         }
-        _ => create_session_for_backend(key, options),
+        _ => create_session_for_backend(key, options, false),
     }?;
 
     // A failed provider/session attempt must not permanently lock the worker
@@ -262,7 +281,7 @@ fn create_automatic_session(
             runtime_fingerprint: key.runtime_fingerprint.clone(),
             provider_fingerprint: candidate_options.provider_fingerprint(),
         };
-        match create_session_for_backend(&candidate_key, &candidate_options) {
+        match create_session_for_backend(&candidate_key, &candidate_options, false) {
             Ok(session) => {
                 info!(backend = %backend, "[ort] automatic backend selected");
                 return Ok(session);
@@ -291,11 +310,7 @@ fn create_automatic_session(
 /// feature set and worker options.
 fn automatic_backend_order(_options: &SessionOptions) -> Vec<Backend> {
     #[cfg(feature = "openvino")]
-    let device_type = _options
-        .openvino_device_type
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(openvino_device_type);
+    let device_type = _options.effective_openvino_device_type();
 
     // An explicit OpenVINO device is a strict request even when the public
     // backend remains `auto`, preserving the DGHS_ORT_DEVICE contract.
@@ -327,9 +342,19 @@ fn automatic_backend_order(_options: &SessionOptions) -> Vec<Backend> {
 fn create_session_for_backend(
     key: &SessionKey,
     options: &SessionOptions,
+    require_full_gpu: bool,
 ) -> Result<Session, InferenceError> {
     let mut builder =
         Session::builder().map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    if require_full_gpu {
+        // The wrapper delegates the entire graph to OpenVINO. Fail if the
+        // provider cannot claim it and keep ORT workers idle during GPU work.
+        builder = builder
+            .with_disable_cpu_fallback()
+            .map_err(|e| InferenceError::Initialization(e.to_string()))?
+            .with_intra_op_spinning(false)
+            .map_err(|e| InferenceError::Initialization(e.to_string()))?;
+    }
     configure_session_builder(&mut builder, key, options)?;
 
     builder
@@ -625,11 +650,7 @@ fn configure_openvino(
     #[cfg(feature = "openvino")]
     {
         let precision = openvino_precision(options.precision)?;
-        let device_type = options
-            .openvino_device_type
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(openvino_device_type);
+        let device_type = options.effective_openvino_device_type();
         runtime::validate_openvino_device_policy(&device_type).map_err(|reason| {
             InferenceError::BackendUnavailable(format!(
                 "OpenVINO device policy {device_type} is unavailable: {reason}"
@@ -726,6 +747,26 @@ pub fn get_or_create_session_with_options<P: AsRef<Path>>(
     let key = SessionKey::from_path(model_path.as_ref(), options)?;
 
     SESSION_CACHE.get_or_try_init(key.clone(), || create_onnx_session_from_key(&key, options))
+}
+
+/// Loads a prepared IR wrapper, including its XML/BIN in the session identity.
+pub(crate) fn get_or_create_openvino_ir_session(
+    model_path: &Path,
+) -> Result<SharedSession, InferenceError> {
+    let options = current_inference_options()?;
+    if !options.targets_openvino_gpu() {
+        return Err(InferenceError::ModelUnsupported(
+            "the prepared OpenVINO model requires an explicit Intel GPU".to_owned(),
+        ));
+    }
+    init_onnx_runtime()?;
+    let options = options.with_backend(Backend::OpenVino);
+    let key = SessionKey::from_openvino_ir(model_path, &options)?;
+    SESSION_CACHE.get_or_try_init(key.clone(), || {
+        let session = create_session_for_backend(&key, &options, true)?;
+        INFERENCE_INITIALIZED.store(true, Ordering::Release);
+        Ok(session)
+    })
 }
 
 /// Returns a cached session after validating model deployment metadata.

@@ -1,5 +1,11 @@
-//! Opt-in real-model parity test. Set DGHS_EMBEDDINGGEMMA2_MODEL_DIR to a Q8
-//! export root, then run this test with --no-default-features -- --ignored.
+//! Opt-in real-model parity tests. Set `DGHS_EMBEDDINGGEMMA2_MODEL_DIR` to a Q8
+//! export root. Set `DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR` to a separately prepared
+//! OpenVINO export to compare its GPU outputs against the original CPU model.
+//! To run the GPU comparison with the installed ONNX Runtime:
+//! ```text
+//! cargo test --no-default-features --features openvino --test embeddinggemma2_benchmark \
+//!   embeddinggemma2_openvino_gpu_matches_cpu -- --ignored --nocapture
+//! ```
 
 use dghs_imgutils_rs::generic::embeddinggemma2::{
     EmbeddingGemma2Options, EmbeddingGemma2TextTask, embeddinggemma2_image_encode,
@@ -34,6 +40,17 @@ fn assert_embedding(actual: &[f32], expected: &[f32], min_cosine: f32) {
     assert!(max_error < 0.02, "max absolute error {max_error}");
 }
 
+fn pattern_image(width: u32, height: u32) -> DynamicImage {
+    DynamicImage::ImageRgba8(RgbaImage::from_fn(width, height, |x, y| {
+        Rgba([
+            (x * 7 % 256) as u8,
+            (y * 3 % 256) as u8,
+            ((x + y) % 256) as u8,
+            (x % 256) as u8,
+        ])
+    }))
+}
+
 #[test]
 #[ignore = "requires Q8 model files, Python uv, and ONNX Runtime"]
 fn embeddinggemma2_python_rust_parity() {
@@ -43,14 +60,7 @@ fn embeddinggemma2_python_rust_parity() {
     let mut images = Vec::new();
     let mut paths = Vec::new();
     for (i, (w, h)) in [(181, 97), (73, 149), (384, 384)].into_iter().enumerate() {
-        let image = DynamicImage::ImageRgba8(RgbaImage::from_fn(w, h, |x, y| {
-            Rgba([
-                (x * 7 % 256) as u8,
-                (y * 3 % 256) as u8,
-                ((x + y) % 256) as u8,
-                (x % 256) as u8,
-            ])
-        }));
+        let image = pattern_image(w, h);
         let path = temp.path().join(format!("image-{i}.png"));
         image.save(&path).unwrap();
         images.push(image);
@@ -135,38 +145,76 @@ fn embeddinggemma2_python_rust_parity() {
 #[ignore = "requires cached EmbeddingGemma 2 model and Intel GPU"]
 fn embeddinggemma2_openvino_gpu_matches_cpu() {
     use dghs_imgutils_rs::inference::Precision;
-    let options = EmbeddingGemma2Options {
-        max_soft_tokens: 70,
+    let cpu_options = EmbeddingGemma2Options {
+        model_dir: std::env::var_os("DGHS_EMBEDDINGGEMMA2_MODEL_DIR").map(Into::into),
         ..Default::default()
     };
-    let texts = vec!["cat".to_string(), "赤い服を着たキャラクター".to_string()];
-    let image = DynamicImage::ImageRgba8(RgbaImage::from_fn(181, 97, |x, y| {
-        Rgba([
-            (x * 7 % 256) as u8,
-            (y * 3 % 256) as u8,
-            ((x + y) % 256) as u8,
-            255,
-        ])
-    }));
-    let run = |session: SessionOptions| {
+    let prepared =
+        std::env::var_os("DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR").map(std::path::PathBuf::from);
+    if let Some(dir) = &prepared {
+        for component in ["model", "vision_encoder"] {
+            let path = dir.join(format!("onnx/{component}_quantized.openvino.onnx"));
+            assert!(
+                path.is_file(),
+                "missing prepared GPU model: {}",
+                path.display()
+            );
+        }
+    }
+    let gpu_options = EmbeddingGemma2Options {
+        model_dir: prepared.clone().or_else(|| cpu_options.model_dir.clone()),
+        ..cpu_options.clone()
+    };
+    let texts = vec![
+        "cat".to_string(),
+        "赤い服を着たキャラクター".to_string(),
+        // A single repeated RoPE position changes this query's final vector.
+        "task: search result | query: cat".to_string(),
+        "title: none | text: A cat wearing red clothes sits beside the window.".to_string(),
+    ];
+    let cases = [
+        (70, pattern_image(181, 97)),
+        (cpu_options.max_soft_tokens, pattern_image(73, 149)),
+    ];
+    let run = |session: SessionOptions, options: &EmbeddingGemma2Options| {
         with_inference_options(session, || {
-            let text = embeddinggemma2_text_encode(&texts, EmbeddingGemma2TextTask::Raw, &options)
-                .unwrap();
-            let images =
-                embeddinggemma2_image_encode(std::slice::from_ref(&image), &options).unwrap();
+            let text =
+                embeddinggemma2_text_encode(&texts, EmbeddingGemma2TextTask::Raw, options).unwrap();
+            assert_eq!(text.len(), texts.len());
+            let mut images = Vec::new();
+            for (budget, image) in &cases {
+                let options = EmbeddingGemma2Options {
+                    max_soft_tokens: *budget,
+                    ..options.clone()
+                };
+                let batch =
+                    embeddinggemma2_image_encode(std::slice::from_ref(image), &options).unwrap();
+                assert_eq!(batch.len(), 1);
+                images.extend(batch);
+            }
             (text, images)
         })
     };
-    let cpu = run(SessionOptions::for_backend(Backend::Cpu));
+    let cpu = run(SessionOptions::for_backend(Backend::Cpu), &cpu_options);
+    let min_cosine = if prepared.is_some() { 0.9999 } else { 0.99 };
     for precision in [Precision::Auto, Precision::Fp32] {
-        let gpu = run(SessionOptions::for_backend(Backend::OpenVino)
-            .with_openvino_device_type("GPU")
-            .with_precision(precision));
-        for (a, b) in gpu.0.iter().zip(&cpu.0) {
-            assert_embedding(a, b, 0.99);
+        let gpu = run(
+            SessionOptions::for_backend(Backend::OpenVino)
+                .with_openvino_device_type("GPU")
+                .with_precision(precision),
+            &gpu_options,
+        );
+        for (text, (a, b)) in texts.iter().zip(gpu.0.iter().zip(&cpu.0)) {
+            println!("GPU {precision:?} text {text:?}");
+            assert_embedding(a, b, min_cosine);
         }
-        for (a, b) in gpu.1.iter().zip(&cpu.1) {
-            assert_embedding(a, b, 0.99);
+        for ((budget, image), (a, b)) in cases.iter().zip(gpu.1.iter().zip(&cpu.1)) {
+            println!(
+                "GPU {precision:?} image {}x{}, budget {budget}",
+                image.width(),
+                image.height()
+            );
+            assert_embedding(a, b, min_cosine);
         }
     }
 }
