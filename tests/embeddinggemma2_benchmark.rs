@@ -1,5 +1,5 @@
 //! Opt-in real-model parity tests. Set `DGHS_EMBEDDINGGEMMA2_MODEL_DIR` to a Q8
-//! export root. Set `DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR` to a separately prepared
+//! export root, or omit it to use the HF cache. GPU preparation is automatic. Set `DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR` to a separately prepared
 //! OpenVINO export to compare its GPU outputs against the original CPU model.
 //! To run the GPU comparison with the installed ONNX Runtime:
 //! ```text
@@ -196,7 +196,7 @@ fn embeddinggemma2_openvino_gpu_matches_cpu() {
         })
     };
     let cpu = run(SessionOptions::for_backend(Backend::Cpu), &cpu_options);
-    let min_cosine = if prepared.is_some() { 0.9999 } else { 0.99 };
+    let min_cosine = 0.9999;
     for precision in [Precision::Auto, Precision::Fp32] {
         let gpu = run(
             SessionOptions::for_backend(Backend::OpenVino)

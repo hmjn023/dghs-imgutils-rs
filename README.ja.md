@@ -176,32 +176,42 @@ CPU に割り当てられます。専用エクスポートを準備すると、�
 共有モデルの全グラフを OpenVINO GPU で実行できます。
 Linux の Intel Arc、ORT 1.29.0、OpenVINO 2026.4.1 で検証しています。
 
-```bash
-uv run scripts/prepare-embeddinggemma2-openvino.py \
-  /path/to/q8-export /path/to/embeddinggemma2-openvino
-```
+既定の Q8 モデルでは、`intel_gpu` を指定すると元モデルのダウンロード、
+初回の GPU 用モデル生成、キャッシュ保存まで自動で行います。
+**`modelDir`、Python、uv、手動の変換コマンドは不要です。**
+インストール済みの OpenVINO ランタイムには C API ライブラリ（`openvino_c`）が必要です。
+初回は変換時間と追加のディスク容量が必要ですが、次回から生成済みモデルを再利用します。
+保存先は `IU_HOME/embeddinggemma2/openvino`（既定は `~/.cache/dghs-imgutils` 以下）です。
+モデル内容・OpenVINO バージョン・デバイス・精度ごとにキャッシュを分け、
+複数プロセスからの同時起動はロックで調整します。
 
-入力にはダウンロード済みの Q8 エクスポートや Hugging Face の snapshot ディレクトリを
-指定できます。出力先は新規ディレクトリを指定します。準備時に `uv` が Python 依存を用意し、
-約 550 MB のファイルを生成します。スクリプトは検証済みグラフの SHA-256 を照合します。
-共有モデルの RoPE 位置列を明示し、FP32 を維持して OpenVINO IR と ONNX ラッパーを作ります。
-推論時は生成したディレクトリを `modelDir` に指定します。
+`modelDir` は任意です。ローカルの元 ONNX モデル（これも自動変換）や、
+既存の準備済み IR モデルを使いたい場合に指定できます。
+自動準備は検証済みの Q8 リビジョンが対象で、Q4/FP32 は従来の実行経路を使います。
 
 ```typescript
 import {
   embeddinggemma2ImageEncode, embeddinggemma2TextEncode, NapiInferenceProvider,
 } from 'dghs-imgutils-rs';
 
-const options = { dtype: 'q8', modelDir: '/path/to/embeddinggemma2-openvino' };
+const options = { dtype: 'q8' };
 const inference = { provider: NapiInferenceProvider.IntelGpu, precision: 'fp32' };
 const [query] = embeddinggemma2TextEncode(['赤い服を着たキャラクター'], 'SearchQuery', options, inference);
 const images = embeddinggemma2ImageEncode(['./character_a.jpg'], options, inference);
 ```
 
-`onnx/*.openvino.onnx` と同名の `.xml`・`.bin` を一緒に保持してください。
+手動で用意した IR は `onnx/*.openvino.onnx` と同名の `.xml`・`.bin` を一緒に保持します。
+自動キャッシュは `.openvino-compiled.onnx` と `.openvino-compiled.blob` の組になります。
 この経路は ORT の CPU フォールバックを禁止し、GPU で初期化できなければエラーにします。
 画像の読み込み・前処理や GPU ドライバー処理では CPU を使います。
-元のエクスポートと準備済みモデルを比較する回帰テストも実行できます。
+Python/uv なしでの自動生成とキャッシュ再利用は次のテストで確認できます。
+
+```bash
+node scripts/test-embeddinggemma2-auto-cache.mjs image.png
+```
+
+GPU 精度回帰テストも、ディレクトリの環境変数を省略すれば自動準備を検証します。
+以下の変数はローカルのエクスポートを使う場合だけ指定します。
 
 ```bash
 DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/q8-export \

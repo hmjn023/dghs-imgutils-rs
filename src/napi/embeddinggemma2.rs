@@ -8,7 +8,8 @@ use napi_derive::napi;
 #[napi(object)]
 pub struct NapiEmbeddingGemma2Options {
     /// Local export root containing tokenizer.json and onnx/. Defaults to HF download.
-    /// Prepared OpenVINO exports require provider: 'intel_gpu'.
+    /// Intel GPU Q8 models are prepared and cached automatically; Python is not required.
+    /// An existing prepared OpenVINO export can also be specified for intel_gpu.
     pub model_dir: Option<String>,
     /// Weight format: q8 (default), q4, or fp32.
     pub dtype: Option<String>,

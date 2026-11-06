@@ -13,6 +13,9 @@ use ndarray::{Array2, Array3};
 use once_cell::sync::Lazy;
 use tokenizers::Tokenizer;
 
+#[path = "embeddinggemma2_openvino.rs"]
+mod openvino;
+
 use crate::generic::GenericError;
 use crate::hub::hf_hub_download;
 use crate::inference::{
@@ -116,7 +119,8 @@ impl EmbeddingGemma2TextTask {
 pub struct EmbeddingGemma2Options {
     /// Local export root containing `tokenizer.json` and `onnx/`. When absent,
     /// required files are downloaded from [`REPO_ID`] into the HF cache.
-    /// Prepared `.openvino.onnx` exports require an explicit OpenVINO GPU.
+    /// Intel GPU Q8 models are prepared and cached automatically. This optional
+    /// directory can contain original ONNX files or prepared OpenVINO exports.
     pub model_dir: Option<PathBuf>,
     /// ONNX weight format, independent of the execution provider's precision.
     pub dtype: EmbeddingGemma2Dtype,
@@ -182,6 +186,11 @@ impl EmbeddingGemma2Options {
         let path = self.asset(&name)?;
         // All published graphs store their weights in an adjacent external file.
         let weights = self.asset(&format!("{name}_data"))?;
+        if self.dtype == EmbeddingGemma2Dtype::Q8
+            && current_inference_options()?.targets_openvino_gpu()
+        {
+            return openvino::prepare(&path, &weights);
+        }
         if weights.symlink_metadata()?.file_type().is_symlink() {
             // ORT 1.24 rejects external-data symlinks escaping the model directory.
             // Stage an immutable export with ordinary files/hard links instead.
