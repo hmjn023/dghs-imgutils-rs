@@ -104,8 +104,8 @@ fn ctc_decode(shape: &[usize], data: &[f32], chars: &[String]) -> Result<String,
     let blank_idx = 0usize;
 
     let seq_len = match shape.len() {
-        3 => shape[1], // [1, seq_len, num_classes]
-        4 => shape[2], // [1, num_classes, 1, seq_len] — PaddleOCR sometimes uses this
+        3 => shape[1],                  // [1, seq_len, num_classes]
+        4 if shape[2] == 1 => shape[3], // [1, num_classes, 1, seq_len]
         _ => {
             return Err(OcrError::CharDict(format!(
                 "Unexpected recognition output shape: {:?}",
@@ -119,6 +119,17 @@ fn ctc_decode(shape: &[usize], data: &[f32], chars: &[String]) -> Result<String,
         4 => shape[1],
         _ => unreachable!(),
     };
+
+    if shape[0] != 1
+        || num_classes != chars.len()
+        || seq_len.checked_mul(num_classes) != Some(data.len())
+    {
+        return Err(OcrError::CharDict(format!(
+            "Recognition output {shape:?} does not match dictionary ({} classes) or data ({} values)",
+            chars.len(),
+            data.len()
+        )));
+    }
 
     let mut raw_indices = Vec::new();
     for t in 0..seq_len {
@@ -167,17 +178,50 @@ fn load_char_dict() -> Result<Vec<String>, OcrError> {
         return Ok(dict.clone());
     }
 
-    let path = hf_hub_download(DET_REPO_ID, CHAR_DICT_PATH, None, None)?;
+    let path = hf_hub_download(REC_REPO_ID, CHAR_DICT_PATH, None, None)?;
     let content = std::fs::read_to_string(path)?;
 
-    let chars: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-
-    if chars.is_empty() {
-        return Err(OcrError::CharDict(
-            "Character dictionary is empty".to_string(),
-        ));
-    }
+    let chars = parse_char_dict(&content)?;
 
     *lock = Some(chars.clone());
     Ok(chars)
+}
+
+// PaddleOCR exports omit class zero (CTC blank) and the final space class.
+fn parse_char_dict(content: &str) -> Result<Vec<String>, OcrError> {
+    if content.is_empty() {
+        return Err(OcrError::CharDict("Character dictionary is empty".into()));
+    }
+    let mut chars = vec!["<blank>".to_string()];
+    chars.extend(content.lines().map(|line| line.trim().to_string()));
+    chars.push(" ".to_string());
+    Ok(chars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn exported_dictionary_includes_blank_and_space_classes() {
+        let chars = parse_char_dict("a\nb\n").unwrap();
+        assert_eq!(chars, ["<blank>", "a", "b", " "]);
+        let data = [
+            0., 1., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0.,
+            1., 0.,
+        ];
+        assert_eq!(ctc_decode(&[1, 6, 4], &data, &chars).unwrap(), "aa b");
+    }
+    #[test]
+    fn channels_first_recognition_uses_last_dimension_for_time() {
+        let chars = parse_char_dict("a\nb").unwrap();
+        let data = [0., 0., 1., 0., 0., 1., 0., 0.];
+        assert_eq!(ctc_decode(&[1, 4, 1, 2], &data, &chars).unwrap(), "ab");
+    }
+    #[test]
+    fn rejects_mismatched_dictionary_and_truncated_outputs() {
+        let chars = parse_char_dict("a").unwrap();
+        assert!(ctc_decode(&[1, 1, 2], &[0., 1.], &chars).is_err());
+        assert!(ctc_decode(&[1, 2, 3], &[0., 1., 0.], &chars).is_err());
+        assert!(parse_char_dict("").is_err());
+    }
 }

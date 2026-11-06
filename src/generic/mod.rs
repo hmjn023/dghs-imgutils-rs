@@ -3,6 +3,7 @@ pub mod embeddinggemma2;
 pub mod enhance;
 pub mod siglip;
 pub mod timm;
+mod tokenize;
 pub mod yoloseg;
 
 use thiserror::Error;
