@@ -5,7 +5,10 @@ Run with: uv run --with numpy --with pillow --with opencv-python-headless \
 
 This uses the same OpenCV bilateralFilter operation as imgutils.restore, with
 fixed parameters (two iterations, diameter 5, sigmaColor 20, sigmaSpace 8).
-PNG preserves the exact uint8 input both implementations receive.
+PNG preserves the exact uint8 input both implementations receive. Final rounding
+matches Rust. OpenCV retains its reflected border and native kernel: the Rust
+test measures border/interior separately; this is approximate agreement, not
+algorithmic equivalence.
 """
 import argparse
 from pathlib import Path
@@ -15,6 +18,7 @@ from PIL import Image
 
 
 def main():
+    """Generate input and independent OpenCV output with round-half-up bytes."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent)
     args = parser.parse_args()
@@ -26,7 +30,7 @@ def main():
     output = image.astype(np.float32)
     for _ in range(2):
         output = cv2.bilateralFilter(output, 5, 20, 8)
-    Image.fromarray(np.clip(output, 0, 255).astype(np.uint8)).save(args.output_dir / "baseline_adversarial.png")
+    Image.fromarray(np.floor(np.clip(output, 0, 255) + 0.5).astype(np.uint8)).save(args.output_dir / "baseline_adversarial.png")
     print(f"Wrote input and Python reference to {args.output_dir}")
 
 

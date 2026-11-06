@@ -169,8 +169,8 @@ pub fn siglip_text_encode(
         entry.text_encoder_path.clone()
     };
 
-    let tok_path = hf_hub_download(repo, &format!("{}/tokenizer.json", model_name), None, None)?;
-    let (input_ids, _attention_mask) = super::tokenize::encode(&tok_path, texts)?;
+    // Exported SIGLIP text encoders support at most 64 positions.
+    let (input_ids, _attention_mask) = super::tokenize::encode(repo, model_name, texts, 64)?;
 
     let text_encoder = get_or_create_session(&text_encoder_path)?;
     let mut text_encoder = lock_session(&text_encoder)?;

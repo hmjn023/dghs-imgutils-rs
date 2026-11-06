@@ -257,8 +257,8 @@ pub fn clip_text_encode(
         entry.text_encoder_path.clone()
     };
 
-    let tok_path = hf_hub_download(repo, &format!("{model_name}/tokenizer.json"), None, None)?;
-    let (input_ids, attention_mask) = super::tokenize::encode(&tok_path, texts)?;
+    // Exported CLIP text encoders support at most 77 positions.
+    let (input_ids, attention_mask) = super::tokenize::encode(repo, model_name, texts, 77)?;
 
     let text_encoder = get_or_create_session(&text_encoder_path)?;
     let mut text_encoder = lock_session(&text_encoder)?;

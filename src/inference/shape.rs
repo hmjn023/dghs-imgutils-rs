@@ -7,6 +7,15 @@ pub(crate) fn image_size(
     dtype: &ValueType,
     channels_last: bool,
 ) -> Result<(u32, u32), InferenceError> {
+    image_size_with_fallback(dtype, channels_last, None)
+}
+
+/// Uses a caller-selected size only for symbolic (negative) spatial dimensions.
+pub(crate) fn image_size_with_fallback(
+    dtype: &ValueType,
+    channels_last: bool,
+    fallback: Option<u32>,
+) -> Result<(u32, u32), InferenceError> {
     let ValueType::Tensor { ty, shape, .. } = dtype else {
         return Err(InferenceError::InvalidShape(
             "image input is not a tensor".into(),
@@ -18,8 +27,15 @@ pub(crate) fn image_size(
             "expected a rank-4 RGB float32 input, got {dtype:?}"
         )));
     }
-    let width = u32::try_from(shape[w]).ok().filter(|v| *v > 0);
-    let height = u32::try_from(shape[h]).ok().filter(|v| *v > 0);
+    let dimension = |value| {
+        if value < 0 {
+            fallback.filter(|v| *v > 0)
+        } else {
+            u32::try_from(value).ok().filter(|v| *v > 0)
+        }
+    };
+    let width = dimension(shape[w]);
+    let height = dimension(shape[h]);
     match (width, height) {
         (Some(w), Some(h)) => Ok((w, h)),
         _ => Err(InferenceError::InvalidShape(format!(
@@ -48,6 +64,21 @@ mod tests {
             image_size(&dtype(&[-1, 448, 448, 3]), true).unwrap(),
             (448, 448)
         );
+    }
+    #[test]
+    fn classifier_fallback_preserves_fixed_axes() {
+        for (shape, expected) in [
+            ([1, 3, -1, -1], (224, 224)),
+            ([1, 3, 384, -1], (224, 384)),
+            ([1, 3, -1, 448], (448, 224)),
+        ] {
+            assert_eq!(
+                image_size_with_fallback(&dtype(&shape), false, Some(224)).unwrap(),
+                expected
+            );
+        }
+        assert!(image_size_with_fallback(&dtype(&[1, 3, 0, 448]), false, Some(224)).is_err());
+        assert!(image_size_with_fallback(&dtype(&[1, 1, -1, -1]), false, Some(224)).is_err());
     }
     #[test]
     fn rejects_unknown_or_invalid_image_contracts() {

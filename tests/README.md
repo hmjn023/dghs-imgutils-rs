@@ -55,3 +55,9 @@ The reference is an actual filtered PNG, not the input image or a Rust-produced
 baseline. The test requires PSNR above 35 dB and at least 3 dB improvement over
 returning the unchanged input. Missing or identity references fail. This covers
 bilateral filtering only; it does not establish guided-filter or model parity.
+
+OpenCV and Rust use different border handling and bilateral kernels. The filter
+comparison also checks the border and interior separately with matched final
+rounding; passing means approximate agreement, not identical algorithms. OCR
+comparisons check score finiteness only: Rust returns detection confidence,
+whereas Python multiplies detection and recognition confidence.

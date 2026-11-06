@@ -8,19 +8,31 @@ use image::{DynamicImage, RgbImage};
 use std::path::PathBuf;
 
 fn psnr(actual: &RgbImage, expected: &RgbImage) -> f64 {
+    region_psnr(actual, expected, None)
+}
+
+/// Separates the four-pixel border affected by two radius-two filter passes.
+fn region_psnr(actual: &RgbImage, expected: &RgbImage, border: Option<bool>) -> f64 {
     assert_eq!(
         actual.dimensions(),
         expected.dimensions(),
         "reference shape mismatch"
     );
     assert!(!actual.is_empty(), "empty reference image");
-    let mse = actual
-        .as_raw()
-        .iter()
-        .zip(expected.as_raw())
-        .map(|(&a, &b)| (f64::from(a) - f64::from(b)).powi(2))
-        .sum::<f64>()
-        / actual.as_raw().len() as f64;
+    let mut squared_error = 0.0;
+    let mut count = 0;
+    for (x, y, pixel) in actual.enumerate_pixels() {
+        let is_border = x < 4 || y < 4 || x + 4 >= actual.width() || y + 4 >= actual.height();
+        if border.is_some_and(|wanted| wanted != is_border) {
+            continue;
+        }
+        for (&a, &b) in pixel.0.iter().zip(expected.get_pixel(x, y).0.iter()) {
+            squared_error += (f64::from(a) - f64::from(b)).powi(2);
+            count += 1;
+        }
+    }
+    assert!(count > 0, "empty comparison region");
+    let mse = squared_error / count as f64;
     if mse == 0.0 {
         f64::INFINITY
     } else {
@@ -62,6 +74,11 @@ fn test_adversarial_noise_removal_precision() {
     let score = psnr(&actual, &expected);
     println!("Rust versus Python/OpenCV PSNR: {score:.2} dB");
     assert!(score > 35.0, "Python parity PSNR {score:.2} dB <= 35 dB");
+    for (name, border) in [("border", true), ("interior", false)] {
+        let score = region_psnr(&actual, &expected, Some(border));
+        println!("{name} PSNR: {score:.2} dB");
+        assert!(score > 35.0, "{name} PSNR {score:.2} dB <= 35 dB");
+    }
     let identity_score = psnr(&input.to_rgb8(), &expected);
     assert!(
         score > identity_score + 3.0,
@@ -81,4 +98,21 @@ fn psnr_rejects_a_wrong_reference() {
     let a = RgbImage::from_pixel(16, 16, image::Rgb([0; 3]));
     let b = RgbImage::from_pixel(16, 16, image::Rgb([255; 3]));
     assert_eq!(psnr(&a, &b), 0.0);
+}
+
+#[test]
+fn nonconstant_filter_has_known_weighted_output() {
+    let input = DynamicImage::ImageRgb8(RgbImage::from_fn(2, 1, |x, _| {
+        image::Rgb([100 + x as u8 * 10; 3])
+    }));
+    let mut settings = params();
+    settings.b_iters = 1;
+    settings.diameter_min = 3;
+    settings.diameter_max = 3;
+    // Neighbor weight exp(-1/(2*8²) - 3*10²/(2*20²)); normalized means round to 104,106.
+    let actual = remove_adversarial_noise_with_params(&input, &settings)
+        .unwrap()
+        .to_rgb8();
+    assert_eq!(actual.get_pixel(0, 0).0, [104; 3]);
+    assert_eq!(actual.get_pixel(1, 0).0, [106; 3]);
 }

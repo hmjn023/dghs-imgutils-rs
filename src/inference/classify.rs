@@ -83,13 +83,13 @@ fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), Inferenc
     Ok(())
 }
 
-/// Reads the actual NCHW input dimensions instead of assuming a 224px model.
+/// Reads fixed NCHW dimensions, retaining the historical 224px size for dynamic axes.
 fn get_model_input_size(session: &Session) -> Result<(u32, u32), InferenceError> {
     let input = session
         .inputs()
         .first()
         .ok_or_else(|| InferenceError::InvalidShape("model has no input".into()))?;
-    super::shape::image_size(input.dtype(), false)
+    super::shape::image_size_with_fallback(input.dtype(), false, Some(224))
 }
 
 /// 汎用 ClassifyModel 推論を実行します。

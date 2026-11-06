@@ -48,6 +48,8 @@ fn test_ocr_precision_and_benchmark() {
         );
         let mut unmatched = actual;
         for item in items {
+            // Score parity is not checked: Rust returns detection confidence;
+            // Python multiplies detection and recognition confidence.
             assert!(item.score.is_finite());
             let bbox = (item.bbox[0], item.bbox[1], item.bbox[2], item.bbox[3]);
             let index = unmatched

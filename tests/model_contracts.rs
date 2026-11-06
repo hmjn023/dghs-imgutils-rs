@@ -95,3 +95,31 @@ fn siglip_text() {
     support::embeddings(&emb, 2);
     support::embeddings(&raw, 2);
 }
+
+#[test]
+#[ignore = "requires real model downloads and ONNX Runtime"]
+fn clip_long_text() {
+    let texts = ["an anime illustration ".repeat(200), String::new()];
+    let (emb, raw) = generic::clip::clip_text_encode(
+        &texts,
+        "deepghs/clip_onnx",
+        "openai/clip-vit-base-patch32",
+    )
+    .expect("CLIP long-text inference failed");
+    support::embeddings(&emb, texts.len());
+    support::embeddings(&raw, texts.len());
+}
+
+#[test]
+#[ignore = "requires real model downloads and ONNX Runtime"]
+fn siglip_long_text() {
+    let texts = ["日本語の長い文章 ".repeat(200), String::new()];
+    let (emb, raw) = generic::siglip::siglip_text_encode(
+        &texts,
+        "deepghs/siglip_onnx",
+        "google/siglip-base-patch16-256-multilingual",
+    )
+    .expect("SigLIP long-text inference failed");
+    support::embeddings(&emb, texts.len());
+    support::embeddings(&raw, texts.len());
+}

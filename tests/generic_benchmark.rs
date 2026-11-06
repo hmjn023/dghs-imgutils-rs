@@ -56,7 +56,14 @@ fn generic_benchmark_yoloseg() {
     let model = std::env::var("DGHS_YOLOSEG_MODEL").expect("set DGHS_YOLOSEG_MODEL");
     let image = support::image();
     support::benchmark("YOLO-Seg", 3, || {
-        yoloseg::yolo_seg_predict(&image, &repo, &model, 0.25, 0.7)
-            .expect("YOLO-Seg inference failed")
+        let detections = yoloseg::yolo_seg_predict(&image, &repo, &model, 0.25, 0.7)
+            .expect("YOLO-Seg inference failed");
+        for detection in detections {
+            assert!(detection.score.is_finite());
+            assert_eq!(
+                detection.mask.dim(),
+                (image.height() as usize, image.width() as usize)
+            );
+        }
     });
 }

@@ -249,6 +249,24 @@ fn test_imgcensor_benchmark_and_precision() {
         .sum::<f64>()
         / actual.as_raw().len() as f64;
     assert!(mae < 2.0, "Python pixel MAE: {mae}");
+    // The changed area must also meet the tolerance; the unchanged background
+    // must not dilute a missing or incorrect stamp.
+    assert!(
+        actual.width() >= 300 && actual.height() >= 300,
+        "fixture must contain the stamp box"
+    );
+    let mut box_error = 0.0;
+    for y in 100..300 {
+        for x in 100..300 {
+            for c in 0..3 {
+                box_error += (f64::from(actual.get_pixel(x, y)[c])
+                    - f64::from(expected.get_pixel(x, y)[c]))
+                .abs();
+            }
+        }
+    }
+    let box_mae = box_error / (200.0 * 200.0 * 3.0);
+    assert!(box_mae < 2.0, "Python stamp-area MAE: {box_mae}");
 
     println!("🎉 Operate benchmark passed!");
 }
