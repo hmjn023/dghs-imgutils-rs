@@ -37,8 +37,12 @@ pub struct SessionKey {
 
 /// Recognizes prepared OpenVINO EPContext wrappers with adjacent XML and BIN files.
 pub(crate) fn is_openvino_ir_wrapper(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name.as_encoded_bytes().ends_with(b".openvino.onnx"))
+    path.file_name().is_some_and(|name| {
+        name.as_encoded_bytes().ends_with(b".openvino.onnx")
+            || name
+                .as_encoded_bytes()
+                .ends_with(b".openvino-compiled.onnx")
+    })
 }
 
 impl SessionKey {
@@ -65,11 +69,18 @@ impl SessionKey {
         path: &Path,
         options: &SessionOptions,
     ) -> Result<Self, InferenceError> {
-        Self::from_model_files(
-            path,
-            options,
-            &[path.with_extension("xml"), path.with_extension("bin")],
-        )
+        if path.file_name().is_some_and(|name| {
+            name.as_encoded_bytes()
+                .ends_with(b".openvino-compiled.onnx")
+        }) {
+            Self::from_model_files(path, options, &[path.with_extension("blob")])
+        } else {
+            Self::from_model_files(
+                path,
+                options,
+                &[path.with_extension("xml"), path.with_extension("bin")],
+            )
+        }
     }
 
     fn from_model_files(
@@ -240,6 +251,25 @@ mod tests {
         assert_ne!(first.model_sha256, second.model_sha256);
         fs::write(&bin, b"new weights").unwrap();
         assert_ne!(second.model_sha256, key().unwrap().model_sha256);
+    }
+
+    #[test]
+    fn compiled_blob_is_required_and_invalidates_session_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = dir.path().join("model.openvino-compiled.onnx");
+        fs::write(&graph, b"wrapper").unwrap();
+        let options = SessionOptions::default();
+        assert!(is_openvino_ir_wrapper(&graph));
+        assert!(SessionKey::from_openvino_ir(&graph, &options).is_err());
+        fs::write(graph.with_extension("blob"), b"blob").unwrap();
+        let first = SessionKey::from_openvino_ir(&graph, &options).unwrap();
+        fs::write(graph.with_extension("blob"), b"changed blob").unwrap();
+        assert_ne!(
+            first.model_sha256,
+            SessionKey::from_openvino_ir(&graph, &options)
+                .unwrap()
+                .model_sha256
+        );
     }
 
     #[test]

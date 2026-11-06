@@ -1,6 +1,6 @@
 [package]
 name = "dghs-imgutils-rs"
-version = "0.5.7"
+version = "0.5.8"
 edition = "2024"
 # The manual benchmark below is a CLI binary, not a libtest benchmark target.
 autobenches = false

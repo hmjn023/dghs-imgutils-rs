@@ -180,34 +180,43 @@ graphs, including vision attention, to CPU. A prepared export runs both complete
 encoder graphs through OpenVINO GPU. This path has been verified on Linux with
 Intel Arc, ORT 1.29.0, and OpenVINO 2026.4.1.
 
-```bash
-uv run scripts/prepare-embeddinggemma2-openvino.py \
-  /path/to/q8-export /path/to/embeddinggemma2-openvino
-```
+For the default Q8 model, selecting `intel_gpu` automatically downloads the
+original model, prepares a GPU executable on first use, and caches it under
+`IU_HOME/embeddinggemma2/openvino` (default: `~/.cache/dghs-imgutils`).
+Neither `modelDir`, Python, uv, nor a manual conversion command is required.
+The installed OpenVINO runtime must include its C API library (`openvino_c`).
+The first call takes longer and needs additional cache space; subsequent calls
+reuse the executable. Cache entries are separated by model contents, OpenVINO
+version, device, and precision. Concurrent processes share an initialization lock.
 
-The source can be a downloaded Q8 export or a Hugging Face snapshot directory.
-Choose a new output directory. The one-time preparation uses `uv` to provide
-Python dependencies and writes about 550 MB. It verifies the tested graphs'
-SHA-256 hashes, makes the shared model's RoPE positions explicit, and preserves
-FP32 while producing OpenVINO IR and ONNX wrappers. Select this output with
-`modelDir` at inference time.
+`modelDir` remains optional: use it for a local original ONNX export (also prepared
+automatically) or an existing prepared IR export. Q4/FP32 exports retain their
+existing execution path; automatic preparation currently supports the validated Q8 revision.
 
 ```typescript
 import {
   embeddinggemma2ImageEncode, embeddinggemma2TextEncode, NapiInferenceProvider,
 } from 'dghs-imgutils-rs';
 
-const options = { dtype: 'q8', modelDir: '/path/to/embeddinggemma2-openvino' };
+const options = { dtype: 'q8' };
 const inference = { provider: NapiInferenceProvider.IntelGpu, precision: 'fp32' };
 const [query] = embeddinggemma2TextEncode(['a character wearing red'], 'SearchQuery', options, inference);
 const images = embeddinggemma2ImageEncode(['./character_a.jpg'], options, inference);
 ```
 
-Keep each `onnx/*.openvino.onnx` with its same-stem `.xml` and `.bin` files.
+For manually prepared IR exports, keep each `onnx/*.openvino.onnx` with its
+same-stem `.xml` and `.bin` files. Automatic caches use `.openvino-compiled.onnx`
+and `.openvino-compiled.blob`; keep these together.
 This path disables ORT CPU fallback and reports an error if GPU initialization
 fails. Image decoding, preprocessing, and GPU driver work still use the CPU.
-Run the public-API regression against the original CPU export with the following
-environment variables.
+Verify automatic preparation and cache reuse without Python/uv:
+
+```bash
+node scripts/test-embeddinggemma2-auto-cache.mjs image.png
+```
+
+The public-API GPU regression automatically prepares the Q8 models when the
+following directory variables are omitted. They optionally select local exports.
 
 ```bash
 DGHS_EMBEDDINGGEMMA2_MODEL_DIR=/path/to/q8-export \

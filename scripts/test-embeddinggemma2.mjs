@@ -31,14 +31,15 @@ assert.throws(() => embeddinggemma2TextEncode(['test'], 'typo', options, cpu));
 assert.throws(() => embeddinggemma2TextEncode(['test'], 'SearchQuery', { dimensions: 64 }, cpu));
 
 const openvinoDir = process.env.DGHS_EMBEDDINGGEMMA2_OPENVINO_DIR;
-if (openvinoDir) {
-  for (const component of ['model', 'vision_encoder']) {
+const automatic = process.env.DGHS_EMBEDDINGGEMMA2_AUTO_GPU === '1';
+if (openvinoDir || automatic) {
+  if (openvinoDir) for (const component of ['model', 'vision_encoder']) {
     const wrapper = join(openvinoDir, 'onnx', `${component}_quantized.openvino.onnx`);
     assert.ok(existsSync(wrapper), `missing prepared GPU model: ${wrapper}`);
   }
   const gpuOptions = { ...options, modelDir: openvinoDir };
   const gpu = { provider: 'intel_gpu', precision: 'fp32' };
-  if (!existsSync(join(openvinoDir, 'onnx', 'model_quantized.onnx'))) {
+  if (openvinoDir && !existsSync(join(openvinoDir, 'onnx', 'model_quantized.onnx'))) {
     assert.throws(
       () => embeddinggemma2TextEncode(texts, 'SearchQuery', gpuOptions, cpu),
       /requires the intel_gpu provider/,
