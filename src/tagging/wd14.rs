@@ -9,33 +9,28 @@ use std::collections::HashMap;
 
 const EMBEDDING_REPO: &str = "deepghs/wd14_tagger_with_embeddings";
 
-const MODEL_NAMES: &[(&str, &str, u32)] = &[
-    ("SwinV2_v3", "SmilingWolf/wd-swinv2-tagger-v3", 224),
-    ("SwinV2", "SmilingWolf/wd-v1-4-swinv2-tagger-v2", 224),
-    ("ConvNext", "SmilingWolf/wd-v1-4-convnext-tagger-v2", 224),
-    ("ConvNext_v3", "SmilingWolf/wd-convnext-tagger-v3", 256),
-    ("ViT", "SmilingWolf/wd-v1-4-vit-tagger-v2", 224),
-    ("ViT_v3", "SmilingWolf/wd-vit-tagger-v3", 384),
-    ("ViT_Large", "SmilingWolf/wd-vit-large-tagger-v3", 384),
-    ("EVA02_Large", "SmilingWolf/wd-eva02-large-tagger-v3", 448),
-    ("MOAT", "SmilingWolf/wd-v1-4-moat-tagger-v2", 224),
-    (
-        "ConvNextV2",
-        "SmilingWolf/wd-v1-4-convnextv2-tagger-v2",
-        224,
-    ),
+const MODEL_NAMES: &[(&str, &str)] = &[
+    ("SwinV2_v3", "SmilingWolf/wd-swinv2-tagger-v3"),
+    ("SwinV2", "SmilingWolf/wd-v1-4-swinv2-tagger-v2"),
+    ("ConvNext", "SmilingWolf/wd-v1-4-convnext-tagger-v2"),
+    ("ConvNext_v3", "SmilingWolf/wd-convnext-tagger-v3"),
+    ("ViT", "SmilingWolf/wd-v1-4-vit-tagger-v2"),
+    ("ViT_v3", "SmilingWolf/wd-vit-tagger-v3"),
+    ("ViT_Large", "SmilingWolf/wd-vit-large-tagger-v3"),
+    ("EVA02_Large", "SmilingWolf/wd-eva02-large-tagger-v3"),
+    ("MOAT", "SmilingWolf/wd-v1-4-moat-tagger-v2"),
+    ("ConvNextV2", "SmilingWolf/wd-v1-4-convnextv2-tagger-v2"),
 ];
 
 const DEFAULT_MODEL: &str = "SwinV2_v3";
 
-fn lookup_model(model_name: &str) -> (&'static str, u32) {
-    for (name, repo, size) in MODEL_NAMES {
+fn lookup_model(model_name: &str) -> &'static str {
+    for (name, repo) in MODEL_NAMES {
         if *name == model_name {
-            return (*repo, *size);
+            return repo;
         }
     }
-    let (_, repo, size) = MODEL_NAMES[0];
-    (repo, size)
+    MODEL_NAMES[0].1
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -49,7 +44,7 @@ fn prepare_image_for_tagging(image: &DynamicImage, target_size: u32) -> Array4<f
     let max_dim = w.max(h);
 
     let padded = if w == max_dim && h == max_dim {
-        image.clone()
+        force_image_background(image, [255, 255, 255])
     } else {
         let pad_left = (max_dim - w) / 2;
         let pad_top = (max_dim - h) / 2;
@@ -114,7 +109,7 @@ pub fn get_wd14_tags(
     no_underline: bool,
     drop_overlap: bool,
 ) -> Result<TagResult, TaggingError> {
-    let (repo_path, target_size) = lookup_model(model_name);
+    let repo_path = lookup_model(model_name);
 
     let model_path = hf_hub_download(
         EMBEDDING_REPO,
@@ -125,10 +120,21 @@ pub fn get_wd14_tags(
 
     let tags_path = hf_hub_download(repo_path, "selected_tags.csv", None, None)?;
 
+    let session_arc = get_or_create_session(&model_path)?;
+    let target_size = {
+        let session = crate::inference::lock_session(&session_arc)?;
+        let (width, height) =
+            crate::inference::shape::image_size(session.inputs()[0].dtype(), true)?;
+        if width != height {
+            return Err(TaggingError::InvalidArgument(
+                "WD14 requires a square input".into(),
+            ));
+        }
+        width
+    };
     let input_tensor = prepare_image_for_tagging(image, target_size);
 
     let prediction = {
-        let session_arc = get_or_create_session(&model_path)?;
         let mut session = session_arc.lock().map_err(|e| {
             crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
         })?;
@@ -262,4 +268,25 @@ pub fn get_wd14_tags(
 
 pub fn get_wd14_tags_simple(image: &DynamicImage) -> Result<TagResult, TaggingError> {
     get_wd14_tags(image, DEFAULT_MODEL, 0.35, false, 0.85, false, false, false)
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    #[test]
+    fn square_transparent_input_uses_white_background_and_bgr() {
+        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([255, 0, 0, 0]),
+        ));
+        let tensor = prepare_image_for_tagging(&img, 4);
+        assert_eq!(tensor.shape(), [1, 4, 4, 3]);
+        assert!(tensor.iter().all(|&v| v == 255.0));
+        let red =
+            DynamicImage::ImageRgb8(image::RgbImage::from_pixel(2, 2, image::Rgb([255, 0, 0])));
+        let tensor = prepare_image_for_tagging(&red, 2);
+        assert_eq!(tensor[[0, 0, 0, 0]], 0.0);
+        assert_eq!(tensor[[0, 0, 0, 2]], 255.0);
+    }
 }

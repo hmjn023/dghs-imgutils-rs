@@ -66,10 +66,10 @@ fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), Inferenc
 
     let session = get_or_create_session(&model_path)?;
 
-    // 入力サイズをモデルメタから取得（fallback: 224x224）
+    // 入力サイズをONNXセッションの実際の入力形状から取得
     let (input_w, input_h) = {
         let session_guard = lock_session(&session)?;
-        get_model_input_size(&session_guard)
+        get_model_input_size(&session_guard)?
     };
 
     let entry = ClassifyEntry {
@@ -83,11 +83,13 @@ fn ensure_classify_model(repo_id: &str, model_name: &str) -> Result<(), Inferenc
     Ok(())
 }
 
-/// モデルの入力サイズをセッションメタデータから取得します。
-/// 取得できない場合は 224x224 をデフォルトとして返します。
-fn get_model_input_size(_session: &Session) -> (u32, u32) {
-    // ort 2.0 の API では動的にサイズを取れないケースがあるため 224x224 をデフォルトとする
-    (224, 224)
+/// Reads the actual NCHW input dimensions instead of assuming a 224px model.
+fn get_model_input_size(session: &Session) -> Result<(u32, u32), InferenceError> {
+    let input = session
+        .inputs()
+        .first()
+        .ok_or_else(|| InferenceError::InvalidShape("model has no input".into()))?;
+    super::shape::image_size(input.dtype(), false)
 }
 
 /// 汎用 ClassifyModel 推論を実行します。

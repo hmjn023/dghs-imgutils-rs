@@ -3,8 +3,7 @@ use crate::image::force_image_background;
 use crate::inference::get_or_create_session;
 use crate::tagging::overlap::drop_overlap_tags;
 use crate::tagging::{TagResult, TaggingError};
-use image::{DynamicImage, GenericImageView};
-use ndarray::Array4;
+use image::DynamicImage;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -19,126 +18,6 @@ struct PreprocessConfig {
 struct TagRecord {
     name: String,
     category: usize,
-}
-
-fn apply_preprocess_to_chw(image: &DynamicImage, stages: &[serde_json::Value]) -> Array4<f32> {
-    let mut img = image.clone();
-
-    for stage in stages {
-        let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match ttype {
-            "resize" => {
-                let size = stage
-                    .get("size")
-                    .and_then(|v| {
-                        if let Some(n) = v.as_u64() {
-                            Some(n as u32)
-                        } else if let Some(arr) = v.as_array() {
-                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(384);
-                let (w, h) = img.dimensions();
-                let (nw, nh) = if w < h {
-                    (size, (size as f64 * h as f64 / w as f64) as u32)
-                } else {
-                    ((size as f64 * w as f64 / h as f64) as u32, size)
-                };
-                img = img.resize_exact(
-                    nw.max(1),
-                    nh.max(1),
-                    image::imageops::FilterType::CatmullRom,
-                );
-            }
-            "center_crop" => {
-                let size = stage
-                    .get("size")
-                    .and_then(|v| {
-                        if let Some(n) = v.as_u64() {
-                            Some(n as u32)
-                        } else if let Some(arr) = v.as_array() {
-                            arr.first().and_then(|x| x.as_u64()).map(|x| x as u32)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(384);
-                let (w, h) = img.dimensions();
-                let x = (w.saturating_sub(size)) / 2;
-                let y = (h.saturating_sub(size)) / 2;
-                img = img.crop_imm(x, y, size.min(w - x), size.min(h - y));
-            }
-            "pad_to_size" => {
-                let s = 384u32;
-                img = crate::image::pad_image_to_size(&img, s, s, [255, 255, 255]);
-            }
-            "convert_rgb" => {
-                img = force_image_background(&img, [255, 255, 255]);
-            }
-            "to_tensor" | "maybe_to_tensor" => {}
-            "rescale" => {}
-            "normalize" => {}
-            _ => {}
-        }
-    }
-
-    let (w, h) = img.dimensions();
-    let mut array = Array4::<f32>::zeros((1, 3, h as usize, w as usize));
-    let rgb8 = img.to_rgb8();
-
-    for (x, y, pixel) in rgb8.enumerate_pixels() {
-        array[[0, 0, y as usize, x as usize]] = pixel[0] as f32;
-        array[[0, 1, y as usize, x as usize]] = pixel[1] as f32;
-        array[[0, 2, y as usize, x as usize]] = pixel[2] as f32;
-    }
-
-    for stage in stages {
-        let ttype = stage.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match ttype {
-            "rescale" => {
-                let factor = stage
-                    .get("rescale_factor")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0 / 255.0) as f32;
-                array.mapv_inplace(|v| v * factor);
-            }
-            "normalize" => {
-                let mean: Vec<f32> = stage
-                    .get("mean")
-                    .and_then(|v| {
-                        v.as_array().map(|arr| {
-                            arr.iter()
-                                .filter_map(|x| x.as_f64())
-                                .map(|x| x as f32)
-                                .collect()
-                        })
-                    })
-                    .unwrap_or_else(|| vec![0.0; 3]);
-                let std: Vec<f32> = stage
-                    .get("std")
-                    .and_then(|v| {
-                        v.as_array().map(|arr| {
-                            arr.iter()
-                                .filter_map(|x| x.as_f64())
-                                .map(|x| x as f32)
-                                .collect()
-                        })
-                    })
-                    .unwrap_or_else(|| vec![1.0; 3]);
-                for c in 0..3 {
-                    let m = mean.get(c).copied().unwrap_or(0.0);
-                    let s = std.get(c).copied().unwrap_or(1.0);
-                    let mut slice = array.slice_mut(ndarray::s![0, c, .., ..]);
-                    slice.mapv_inplace(|v| (v - m) / s);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    array
 }
 
 fn get_threshold_value(config: &serde_json::Value, cate_name: &str, mode: &str) -> f32 {
@@ -205,7 +84,7 @@ pub fn get_camie_tags(
     let thresh_config: serde_json::Value = serde_json::from_str(&thresh_content)?;
 
     let rgb = force_image_background(image, [255, 255, 255]);
-    let input_tensor = apply_preprocess_to_chw(&rgb, &preproc.stages);
+    let input_tensor = crate::image::preprocess::apply(&rgb, &preproc.stages)?;
 
     let mut rdr = csv::Reader::from_path(&tags_path)?;
     let mut tag_defs = Vec::new();

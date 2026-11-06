@@ -4,6 +4,7 @@ pub mod encode;
 pub mod error;
 pub mod layer;
 pub mod load;
+pub(crate) mod preprocess;
 
 pub use encode::{rgb_decode, rgb_encode};
 pub use error::ImageError;

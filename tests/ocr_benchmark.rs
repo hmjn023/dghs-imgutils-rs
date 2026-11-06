@@ -1,21 +1,11 @@
-use dghs_imgutils_rs::ocr::{detect_text_with_paddleocr, ocr};
-use std::path::PathBuf;
-use std::time::Instant;
+//! Opt-in Python parity check. Dependency and inference failures are test failures.
+mod support;
+use dghs_imgutils_rs::ocr::ocr;
 
 #[derive(Debug, serde::Deserialize)]
 struct PythonOcrOutput {
-    success: bool,
-    error: Option<String>,
-    detections: Vec<PythonDetection>,
-    results: Vec<PythonOcrItem>,
+    results: Vec<Vec<PythonOcrItem>>,
 }
-
-#[derive(Debug, serde::Deserialize)]
-struct PythonDetection {
-    bbox: [i32; 4],
-    score: f32,
-}
-
 #[derive(Debug, serde::Deserialize)]
 struct PythonOcrItem {
     bbox: [i32; 4],
@@ -24,96 +14,81 @@ struct PythonOcrItem {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires Python imgutils, OCR models and reference images"]
 fn test_ocr_precision_and_benchmark() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-
-    let test_images = vec![
-        "imgutils/test/testfile/skadi.jpg",
-        "imgutils/test/testfile/nude_girl.png",
-        "imgutils/test/testfile/hutao.jpg",
-    ];
-
-    println!("============================================================");
-    println!(" OCR (PaddleOCR) Precision Validation & Benchmark");
-    println!("============================================================");
-
-    let mut image_paths = Vec::new();
-    for rel_path in &test_images {
-        let mut path = PathBuf::from(manifest_dir);
-        path.push(rel_path);
-        assert!(path.exists(), "Test image not found: {:?}", path);
-        image_paths.push(path);
-    }
-
-    println!("Running Python OCR inference...");
-    let py_start = Instant::now();
-
-    let mut cmd = std::process::Command::new("uv");
-    cmd.current_dir("imgutils")
-        .arg("run")
-        .arg("python")
-        .arg("../benchmark/run_python_ocr.py");
-    for path in &image_paths {
-        cmd.arg(path);
-    }
-
-    let output = cmd.output().expect("Failed to execute python via uv");
-    let py_duration = py_start.elapsed();
-
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    let stderr_str = String::from_utf8_lossy(&output.stderr);
-
-    if !output.status.success() {
-        panic!(
-            "Python error:\nSTDOUT:\n{}\nSTDERR:\n{}",
-            stdout_str, stderr_str
-        );
-    }
-
-    let py_output: PythonOcrOutput =
-        serde_json::from_str(&stdout_str).expect("Failed to parse Python JSON output");
-
+    let paths: Vec<_> = ["skadi.jpg", "nude_girl.png", "hutao.jpg"]
+        .iter()
+        .map(|name| support::fixture(&format!("imgutils/test/testfile/{name}")))
+        .collect();
+    let output = std::process::Command::new("uv")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/imgutils"))
+        .args(["run", "python", "../benchmark/run_python_ocr.py"])
+        .args(&paths)
+        .output()
+        .expect("Python reference requires uv and imgutils");
     assert!(
-        py_output.success,
-        "Python OCR failed: {:?}",
-        py_output.error
+        output.status.success(),
+        "Python OCR failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    println!("Python OCR done ({:?})", py_duration);
-
-    println!("Running Rust OCR inference...");
-    let mut images = Vec::new();
-    for path in &image_paths {
-        let img = image::open(path).expect("Failed to open test image in Rust");
-        images.push(img);
-    }
-
-    let rust_start = Instant::now();
-    let mut all_results = Vec::new();
-    for img in &images {
-        let results = ocr(img).expect("Rust OCR failed");
-        all_results.push(results);
-    }
-    let rust_duration = rust_start.elapsed();
-    println!("Rust OCR done ({:?})", rust_duration);
-
-    assert_eq!(
-        all_results.len(),
-        py_output.results.len(),
-        "Number of images processed differs"
+    let expected: PythonOcrOutput =
+        serde_json::from_slice(&output.stdout).expect("invalid reference JSON");
+    assert_eq!(paths.len(), expected.results.len(), "reference image count");
+    assert!(
+        expected.results.iter().any(|items| !items.is_empty()),
+        "fixtures must exercise recognition"
     );
-
-    for (img_idx, rust_items) in all_results.iter().enumerate() {
-        let py_items = &py_output.results;
-        println!(
-            "Image {}: Rust got {} results, Python got {} results",
-            img_idx,
-            rust_items.len(),
-            py_items.len()
+    for (path, items) in paths.iter().zip(expected.results) {
+        let actual = ocr(&image::open(path).unwrap()).expect("Rust OCR failed");
+        assert_eq!(
+            actual.len(),
+            items.len(),
+            "OCR count differs for {}",
+            path.display()
         );
+        let mut unmatched = actual;
+        for item in items {
+            assert!(item.score.is_finite());
+            let bbox = (item.bbox[0], item.bbox[1], item.bbox[2], item.bbox[3]);
+            let index = unmatched
+                .iter()
+                .position(|(b, text, score)| {
+                    text == &item.text
+                        && score.is_finite()
+                        && dghs_imgutils_rs::detect::similarity::calculate_iou(
+                            &(
+                                b.0.max(0) as u32,
+                                b.1.max(0) as u32,
+                                b.2.max(0) as u32,
+                                b.3.max(0) as u32,
+                            ),
+                            &(
+                                bbox.0.max(0) as u32,
+                                bbox.1.max(0) as u32,
+                                bbox.2.max(0) as u32,
+                                bbox.3.max(0) as u32,
+                            ),
+                        ) > 0.5
+                })
+                .unwrap_or_else(|| {
+                    panic!("no matching OCR result for {item:?} in {}", path.display())
+                });
+            unmatched.remove(index);
+        }
     }
+}
 
-    let speedup = py_duration.as_secs_f64() / rust_duration.as_secs_f64();
-    println!("\nSpeedup: {:.2}x", speedup);
-    println!("============================================================");
+#[test]
+fn reference_preserves_image_boundaries() {
+    let output: PythonOcrOutput =
+        serde_json::from_str(r#"{"results":[[],[{"bbox":[1,2,3,4],"text":"hello","score":0.9}]]}"#)
+            .unwrap();
+    assert!(output.results[0].is_empty());
+    assert_eq!(output.results[1][0].text, "hello");
+    assert!(
+        serde_json::from_str::<PythonOcrOutput>(
+            r#"{"results":[{"bbox":[1,2,3,4],"text":"hello","score":0.9}]}"#
+        )
+        .is_err()
+    );
 }

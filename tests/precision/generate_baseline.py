@@ -1,48 +1,33 @@
+"""Generate deterministic OpenCV reference images for Rust's bilateral filter.
+
+Run with: uv run --with numpy --with pillow --with opencv-python-headless \
+    tests/precision/generate_baseline.py --output-dir /tmp/imgutils-baseline
+
+This uses the same OpenCV bilateralFilter operation as imgutils.restore, with
+fixed parameters (two iterations, diameter 5, sigmaColor 20, sigmaSpace 8).
+PNG preserves the exact uint8 input both implementations receive.
 """
-精度検証用の基準データを生成するスクリプト。
-
-使用方法:
-    python generate_baseline.py
-
-生成されるファイル:
-    - baseline_input.npy: テスト入力画像 (RGB, float32, 0-255)
-    - baseline_adversarial.npy: adversarial noise removal 結果
-"""
-
+import argparse
+from pathlib import Path
+import cv2
 import numpy as np
 from PIL import Image
 
-def generate_test_image(width: int = 64, height: int = 64) -> np.ndarray:
-    """テスト用の画像を生成する。"""
-    # グラデーションパターン
-    img = np.zeros((height, width, 3), dtype=np.float32)
-    for y in range(height):
-        for x in range(width):
-            img[y, x, 0] = (x / width) * 255.0  # R
-            img[y, x, 1] = (y / height) * 255.0  # G
-            img[y, x, 2] = ((x + y) / (width + height)) * 255.0  # B
-    return img
-
-
-def add_noise(img: np.ndarray, noise_level: float = 10.0) -> np.ndarray:
-    """ノイズを追加する。"""
-    noise = np.random.randn(*img.shape).astype(np.float32) * noise_level
-    return np.clip(img + noise, 0, 255).astype(np.float32)
-
 
 def main():
-    np.random.seed(42)  # 再現性のため
-
-    # テスト画像生成
-    img = generate_test_image(64, 64)
-    noisy_img = add_noise(img, noise_level=10.0)
-
-    # 保存
-    np.save("baseline_input.npy", noisy_img)
-    print(f"Saved baseline_input.npy: shape={noisy_img.shape}, dtype={noisy_img.dtype}")
-
-    # adversarial noise removal は Rust で実行するため、ここでは入力のみ生成
-    print("Run Rust tests to generate adversarial output for comparison.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent)
+    args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    y, x = np.mgrid[:64, :64]
+    image = np.stack([x * 255 / 64, y * 255 / 64, (x + y) * 255 / 128], axis=-1)
+    image = np.clip(image + np.random.default_rng(42).normal(0, 10, image.shape), 0, 255).astype(np.uint8)
+    Image.fromarray(image).save(args.output_dir / "baseline_input.png")
+    output = image.astype(np.float32)
+    for _ in range(2):
+        output = cv2.bilateralFilter(output, 5, 20, 8)
+    Image.fromarray(np.clip(output, 0, 255).astype(np.uint8)).save(args.output_dir / "baseline_adversarial.png")
+    print(f"Wrote input and Python reference to {args.output_dir}")
 
 
 if __name__ == "__main__":

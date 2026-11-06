@@ -3,13 +3,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use image::DynamicImage;
-use ndarray::{Array2, Array4};
+use ndarray::Array4;
 use once_cell::sync::Lazy;
 
-use crate::generic::clip::SimpleTokenizer;
 use crate::generic::{EncoderOutput, GenericError, PredictionOutput};
 use crate::hub::hf_hub_download;
-use crate::image::{force_image_background, to_ndarray_chw};
 use crate::inference::{get_or_create_session, lock_session};
 
 const DEFAULT_REPO_ID: &str = "deepghs/siglip_onnx";
@@ -20,6 +18,7 @@ struct SigLIPModelEntry {
     logit_scale: f32,
     logit_bias: f32,
     input_size: u32,
+    preprocess: Vec<serde_json::Value>,
 }
 
 static SIGLIP_CACHE: Lazy<Mutex<HashMap<String, SigLIPModelEntry>>> =
@@ -52,7 +51,25 @@ fn ensure_siglip_model(repo_id: &str, model_name: &str) -> Result<(), GenericErr
     let meta: serde_json::Value = serde_json::from_str(&meta_str)?;
     let logit_scale = meta["logit_scale"].as_f64().unwrap_or(4.605170185988091) as f32;
     let logit_bias = meta["logit_bias"].as_f64().unwrap_or(0.0) as f32;
-    let input_size = meta["input_size"].as_u64().unwrap_or(224) as u32;
+    let input_size = meta["image_size"]
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .filter(|v| *v > 0)
+        .ok_or_else(|| {
+            GenericError::InvalidArgument("missing positive image_size in model metadata".into())
+        })?;
+    let preprocessor_path = hf_hub_download(
+        repo_id,
+        &format!("{model_name}/preprocessor.json"),
+        None,
+        None,
+    )?;
+    let preprocessor: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(preprocessor_path)?)?;
+    let preprocess = preprocessor["stages"]
+        .as_array()
+        .cloned()
+        .ok_or_else(|| GenericError::InvalidArgument("preprocessor has no stages".into()))?;
 
     let entry = SigLIPModelEntry {
         image_encoder_path,
@@ -60,20 +77,11 @@ fn ensure_siglip_model(repo_id: &str, model_name: &str) -> Result<(), GenericErr
         logit_scale,
         logit_bias,
         input_size,
+        preprocess,
     };
 
     SIGLIP_CACHE.lock().unwrap().insert(key, entry);
     Ok(())
-}
-
-const SIGLIP_MEAN: [f32; 3] = [0.5, 0.5, 0.5];
-const SIGLIP_STD: [f32; 3] = [0.5, 0.5, 0.5];
-
-fn preprocess_siglip_image(image: &DynamicImage, size: u32) -> Result<Array4<f32>, GenericError> {
-    let rgb = force_image_background(image, [255, 255, 255]);
-    let resized = rgb.resize_exact(size, size, image::imageops::FilterType::Triangle);
-    let tensor = to_ndarray_chw(&resized, &SIGLIP_MEAN, &SIGLIP_STD)?;
-    Ok(tensor)
 }
 
 /// Encode image(s) into SigLIP embeddings.
@@ -90,18 +98,29 @@ pub fn siglip_image_encode(
     ensure_siglip_model(repo, model_name)?;
 
     let key = format!("{}/{}", repo, model_name);
-    let (image_encoder_path, size) = {
+    let (image_encoder_path, size, preprocess) = {
         let cache = SIGLIP_CACHE.lock().unwrap();
         let entry = cache
             .get(&key)
             .ok_or_else(|| GenericError::InvalidArgument("Model not found in cache".to_string()))?;
-        (entry.image_encoder_path.clone(), entry.input_size)
+        (
+            entry.image_encoder_path.clone(),
+            entry.input_size,
+            entry.preprocess.clone(),
+        )
     };
 
     let n = images.len();
     let mut batch = Array4::<f32>::zeros((n, 3, size as usize, size as usize));
     for (i, img) in images.iter().enumerate() {
-        let tensor = preprocess_siglip_image(img, size)?;
+        let rgb = crate::image::force_image_background(img, [255; 3]);
+        let tensor = crate::image::preprocess::apply(&rgb, &preprocess)?;
+        if tensor.shape() != [1, 3, size as usize, size as usize] {
+            return Err(GenericError::Shape(format!(
+                "preprocessor returned {:?}, expected [1,3,{size},{size}]",
+                tensor.shape()
+            )));
+        }
         batch
             .slice_mut(ndarray::s![i, .., .., ..])
             .assign(&tensor.slice(ndarray::s![0, .., .., ..]));
@@ -151,18 +170,7 @@ pub fn siglip_text_encode(
     };
 
     let tok_path = hf_hub_download(repo, &format!("{}/tokenizer.json", model_name), None, None)?;
-    let tokenizer = SimpleTokenizer::from_tokenizer_json(&tok_path)?;
-    let (all_ids, all_masks) = tokenizer.encode_batch(texts);
-    let n = texts.len();
-
-    let mut input_ids = Array2::<i64>::zeros((n, tokenizer.max_len));
-    let mut attention_mask = Array2::<i64>::zeros((n, tokenizer.max_len));
-    for i in 0..n {
-        for j in 0..tokenizer.max_len {
-            input_ids[[i, j]] = all_ids[i][j];
-            attention_mask[[i, j]] = all_masks[i][j];
-        }
-    }
+    let (input_ids, _attention_mask) = super::tokenize::encode(&tok_path, texts)?;
 
     let text_encoder = get_or_create_session(&text_encoder_path)?;
     let mut text_encoder = lock_session(&text_encoder)?;

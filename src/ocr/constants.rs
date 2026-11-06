@@ -1,12 +1,12 @@
 pub const DET_REPO_ID: &str = "deepghs/paddleocr";
-pub const DET_MODEL_PATH: &str = "ch_PP-OCRv4_det/inference.onnx";
+pub const DET_MODEL_PATH: &str = "det/ch_PP-OCRv4_det/model.onnx";
 pub const DET_DESCRIPTION: &str = "PaddleOCR: Detection model (ch_PP-OCRv4)";
 
 pub const REC_REPO_ID: &str = "deepghs/paddleocr";
-pub const REC_MODEL_PATH: &str = "ch_PP-OCRv4_rec/inference.onnx";
+pub const REC_MODEL_PATH: &str = "rec/ch_PP-OCRv4_rec/model.onnx";
 pub const REC_DESCRIPTION: &str = "PaddleOCR: Recognition model (ch_PP-OCRv4)";
 
-pub const CHAR_DICT_PATH: &str = "ch_PP-OCRv4_rec/ppocr_keys_v1.txt";
+pub const CHAR_DICT_PATH: &str = "rec/ch_PP-OCRv4_rec/dict.txt";
 
 pub const DET_INPUT_NAME: &str = "x";
 pub const DET_OUTPUT_NAME: &str = "sigmoid.0";

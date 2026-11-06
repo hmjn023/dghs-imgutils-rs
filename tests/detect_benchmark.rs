@@ -164,10 +164,13 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
             let mut best_py_idx = None;
             let mut best_iou = 0.3f32;
 
-            for p_idx in 0..py_output.detections.len() {
+            for (p_idx, py_bbox) in py_bboxes.iter().enumerate() {
+                if rust_results[r_idx].label != py_output.detections[p_idx].label {
+                    continue;
+                }
                 let iou = dghs_imgutils_rs::detect::similarity::calculate_iou(
                     &rust_bboxes[r_idx],
-                    &py_bboxes[p_idx],
+                    py_bbox,
                 );
                 if iou > best_iou {
                     best_iou = iou;
@@ -191,6 +194,7 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
             }
         }
 
+        assert!(valid_pairs > 0, "No matching boxes with the same label");
         if valid_pairs > 0 {
             let mae_coords = total_coords_diff / valid_pairs as f32;
             let mae_score = total_score_diff / valid_pairs as f32;
