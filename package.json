@@ -1,6 +1,6 @@
 {
   "name": "dghs-imgutils-rs",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
