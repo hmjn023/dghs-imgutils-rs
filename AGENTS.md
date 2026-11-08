@@ -224,4 +224,4 @@ cd imgutils && uv run python -c "import imgutils; print(imgutils.__version__)"
 
 - Python の参照実装（`imgutils/`）は Rust 実装の仕様参照として使用してください
 - `ort` クレート v2.0.0-rc.12 を使用中（CUDA, TensorRT, OpenVINO, DirectML 対応）
-- napi-rs バインディングは `napi` フィーチャーフラグで有効化（デフォルトで有効）
+- napi-rs バインディングは `napi` フィーチャーフラグで有効化（Node.jsのビルドスクリプトが明示的に有効化）

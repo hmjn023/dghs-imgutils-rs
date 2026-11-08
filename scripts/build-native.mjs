@@ -9,13 +9,14 @@ if (process.argv.includes("--release")) {
 // Provider bindings are dynamically loaded at runtime.  Including them in
 // the native addon lets the library select a compatible host installation;
 // it does not download or bundle CUDA/OpenVINO/driver libraries.
+const features = ["napi"];
 if (process.platform === "linux") {
-  args.push("--features", "cuda,openvino");
+  features.push("cuda", "openvino");
 } else if (process.platform === "win32") {
-  args.push("--features", "openvino");
+  features.push("openvino");
 }
 
-args.push("--cargo-flags=--lib");
+args.push("--features", features.join(","), "--cargo-flags=--lib");
 
 const result = spawnSync("napi", args, {
   stdio: "inherit",
