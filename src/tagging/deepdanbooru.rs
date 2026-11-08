@@ -57,9 +57,10 @@ pub fn get_deepdanbooru_tags(
         let mut session = session_arc.lock().map_err(|e| {
             crate::inference::InferenceError::Initialization(format!("Session lock poisoned: {e}"))
         })?;
+        let input_name = session.inputs()[0].name().to_string();
         let output_name = session.outputs()[0].name().to_string();
         let outputs = session.run(ort::inputs![
-            "input" => ort::value::Tensor::from_array(array.clone())?
+            input_name.as_str() => ort::value::Tensor::from_array(array.clone())?
         ])?;
         let output_value = outputs.get(output_name.as_str()).ok_or_else(|| {
             crate::inference::InferenceError::InvalidShape("No output tensor found".to_string())

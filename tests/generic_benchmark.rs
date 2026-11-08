@@ -1,171 +1,69 @@
-//! Benchmark comparing Rust generic module inference with Python (uv) reference.
-//!
-//! Run with: cargo test --release -- --ignored --nocapture generic_benchmark
-//!
-//! Requires:
-//!   - Python environment with `imgutils` installed (e.g., via `uv`)
-//!   - Network access to HuggingFace Hub for model downloads
-
-use std::process::Command;
-use std::time::Instant;
-
-/// Path to Python interpreter via uv
-const PYTHON_CMD: &str = "uv";
-const PYTHON_ARGS: &[&str] = &["run", "python"];
-
-fn run_python_script(script: &str) -> Result<String, String> {
-    let output = Command::new(PYTHON_CMD)
-        .args(PYTHON_ARGS)
-        .arg("-c")
-        .arg(script)
-        .output()
-        .map_err(|e| format!("Failed to run Python: {}", e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Python error: {}", stderr));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
+//! Opt-in Rust model inference benchmarks. Each warmup and timed run must succeed.
+//! `cargo test --no-default-features --features openvino --test generic_benchmark -- --ignored --nocapture`
+//! Select the backend with DGHS_BACKEND/DGHS_ORT_DEVICE. No Python dependency.
+mod support;
+use dghs_imgutils_rs::generic::{clip, yoloseg};
+const REPO: &str = "deepghs/clip_onnx";
+const MODEL: &str = "openai/clip-vit-base-patch32";
 
 #[test]
-#[ignore]
+#[ignore = "downloads CLIP models and requires ONNX Runtime"]
 fn generic_benchmark_clip_image_encode() {
-    // Python reference timing
-    let py_script = r#"
-import time, numpy as np
-from imgutils.generic import clip_image_encode
-
-# Create a test image
-from PIL import Image
-img = Image.new('RGB', (224, 224), color=(128, 128, 128))
-
-# Warm up
-clip_image_encode([img], repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-
-# Timed runs
-start = time.perf_counter()
-n_runs = 10
-for _ in range(n_runs):
-    clip_image_encode([img], repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-elapsed = time.perf_counter() - start
-print(f"Python avg: {elapsed/n_runs*1000:.2f}ms")
-"#;
-    match run_python_script(py_script) {
-        Ok(out) => println!("Python benchmark:\n{}", out),
-        Err(e) => println!("Python benchmark skipped: {}", e),
-    }
-
-    // Rust timing
-    let image = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
-        224,
-        224,
-        image::Rgb([128u8, 128, 128]),
-    ));
-
-    // Warm up
-    let _ = dghs_imgutils_rs::generic::clip::clip_image_encode(
-        &[image.clone()],
-        "deepghs/clip_onnx",
-        "clip-vit-base-patch32",
-    );
-
-    let n_runs = 10;
-    let start = Instant::now();
-    for _ in 0..n_runs {
-        let _ = dghs_imgutils_rs::generic::clip::clip_image_encode(
-            &[image.clone()],
-            "deepghs/clip_onnx",
-            "clip-vit-base-patch32",
-        );
-    }
-    let elapsed = start.elapsed();
-    println!(
-        "Rust avg: {:.2}ms",
-        elapsed.as_secs_f64() / n_runs as f64 * 1000.0
-    );
+    let image = support::image();
+    support::benchmark("CLIP image", 3, || {
+        let (emb, raw) = clip::clip_image_encode(std::slice::from_ref(&image), REPO, MODEL)
+            .expect("CLIP image inference failed");
+        support::embeddings(&emb, 1);
+        support::embeddings(&raw, 1);
+    });
 }
-
 #[test]
-#[ignore]
+#[ignore = "downloads CLIP models and requires ONNX Runtime"]
 fn generic_benchmark_clip_text_encode() {
-    let py_script = r#"
-import time, numpy as np
-from imgutils.generic import clip_text_encode
-
-texts = ["a cat sitting on a mat", "a dog playing in the park", "anime style illustration", "beautiful landscape"]
-
-clip_text_encode(texts, repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-
-start = time.perf_counter()
-n_runs = 10
-for _ in range(n_runs):
-    clip_text_encode(texts, repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-elapsed = time.perf_counter() - start
-print(f"Python avg: {elapsed/n_runs*1000:.2f}ms")
-"#;
-    match run_python_script(py_script) {
-        Ok(out) => println!("Python benchmark:\n{}", out),
-        Err(e) => println!("Python benchmark skipped: {}", e),
-    }
-
-    let texts: Vec<String> = vec![
-        "a cat sitting on a mat".into(),
-        "a dog playing in the park".into(),
-        "anime style illustration".into(),
-        "beautiful landscape".into(),
-    ];
-
-    let _ = dghs_imgutils_rs::generic::clip::clip_text_encode(
-        &texts,
-        "deepghs/clip_onnx",
-        "clip-vit-base-patch32",
-    );
-
-    let n_runs = 10;
-    let start = Instant::now();
-    for _ in 0..n_runs {
-        let _ = dghs_imgutils_rs::generic::clip::clip_text_encode(
-            &texts,
-            "deepghs/clip_onnx",
-            "clip-vit-base-patch32",
-        );
-    }
-    let elapsed = start.elapsed();
-    println!(
-        "Rust avg: {:.2}ms",
-        elapsed.as_secs_f64() / n_runs as f64 * 1000.0
-    );
+    let texts = vec!["a cat".into(), "an anime illustration".into()];
+    support::benchmark("CLIP text", 3, || {
+        let (emb, raw) =
+            clip::clip_text_encode(&texts, REPO, MODEL).expect("CLIP text inference failed");
+        support::embeddings(&emb, texts.len());
+        support::embeddings(&raw, texts.len());
+    });
 }
-
 #[test]
-#[ignore]
+#[ignore = "downloads CLIP models and requires ONNX Runtime"]
 fn generic_benchmark_clip_predict() {
-    let py_script = r#"
-import time, numpy as np
-from imgutils.generic import clip_predict
-from PIL import Image
-
-img = Image.new('RGB', (224, 224), color=(128, 128, 128))
-texts = ["cat", "dog", "anime", "landscape"]
-
-clip_predict([img], texts, repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-
-start = time.perf_counter()
-n_runs = 10
-for _ in range(n_runs):
-    clip_predict([img], texts, repo_id='deepghs/clip_onnx', model_name='clip-vit-base-patch32')
-elapsed = time.perf_counter() - start
-print(f"Python avg: {elapsed/n_runs*1000:.2f}ms")
-"#;
-    match run_python_script(py_script) {
-        Ok(out) => println!("Python benchmark:\n{}", out),
-        Err(e) => println!("Python benchmark skipped: {}", e),
-    }
+    let image = support::image();
+    let texts = vec!["cat".into(), "dog".into(), "anime".into()];
+    support::benchmark("CLIP predict", 3, || {
+        let (image_emb, _) = clip::clip_image_encode(std::slice::from_ref(&image), REPO, MODEL)
+            .expect("CLIP image inference failed");
+        let (text_emb, _) =
+            clip::clip_text_encode(&texts, REPO, MODEL).expect("CLIP text inference failed");
+        let scale = clip::clip_logit_scale(REPO, MODEL).expect("CLIP metadata failed");
+        let (similarity, logits, probabilities) = clip::clip_predict(&image_emb, &text_emb, scale);
+        for values in [&similarity, &logits, &probabilities] {
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].len(), texts.len());
+            assert!(values[0].iter().all(|x| x.is_finite()));
+        }
+        assert!((probabilities[0].iter().sum::<f32>() - 1.0).abs() < 1e-5);
+    });
 }
-
 #[test]
-#[ignore]
+#[ignore = "requires DGHS_YOLOSEG_REPO and DGHS_YOLOSEG_MODEL plus ONNX Runtime"]
 fn generic_benchmark_yoloseg() {
-    println!("YOLO-Seg benchmark requires a model + image. Skipping automated run.");
-    println!("Run manually with: cargo test --release -- --ignored --nocapture yoloseg");
+    let repo = std::env::var("DGHS_YOLOSEG_REPO")
+        .expect("set DGHS_YOLOSEG_REPO to an accessible YOLO-Seg repository");
+    let model = std::env::var("DGHS_YOLOSEG_MODEL").expect("set DGHS_YOLOSEG_MODEL");
+    let image = support::image();
+    support::benchmark("YOLO-Seg", 3, || {
+        let detections = yoloseg::yolo_seg_predict(&image, &repo, &model, 0.25, 0.7)
+            .expect("YOLO-Seg inference failed");
+        for detection in detections {
+            assert!(detection.score.is_finite());
+            assert_eq!(
+                detection.mask.dim(),
+                (image.height() as usize, image.width() as usize)
+            );
+        }
+    });
 }

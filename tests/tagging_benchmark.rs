@@ -1,3 +1,4 @@
+mod support;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -6,7 +7,7 @@ use std::time::Instant;
 fn test_tagging_benchmark() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
-    let test_images = vec![
+    let test_images = [
         "imgutils/test/testfile/skadi.jpg",
         "imgutils/test/testfile/hutao.jpg",
     ];
@@ -15,6 +16,7 @@ fn test_tagging_benchmark() {
     println!("Tagging Backend Benchmarks");
     println!("============================================================");
 
+    let mut failures = Vec::new();
     for (idx, rel_path) in test_images.iter().enumerate() {
         let mut image_path = PathBuf::from(manifest_dir);
         image_path.push(rel_path);
@@ -39,7 +41,7 @@ fn test_tagging_benchmark() {
                 r.general.len(),
                 r.character.len()
             ),
-            Err(e) => println!("  DeepDanbooru: FAILED - {}", e),
+            Err(e) => failures.push(format!("DeepDanbooru: {e}")),
         }
 
         // ML-Danbooru
@@ -48,7 +50,7 @@ fn test_tagging_benchmark() {
         let dur = start.elapsed();
         match result {
             Ok(r) => println!("  ML-Danbooru:  {:?} (general={})", dur, r.general.len()),
-            Err(e) => println!("  ML-Danbooru:  FAILED - {}", e),
+            Err(e) => failures.push(format!("ML-Danbooru: {e}")),
         }
 
         // DeepGelbooru
@@ -62,7 +64,7 @@ fn test_tagging_benchmark() {
                 r.general.len(),
                 r.character.len()
             ),
-            Err(e) => println!("  DeepGelbooru: FAILED - {}", e),
+            Err(e) => failures.push(format!("DeepGelbooru: {e}")),
         }
 
         // WD14 (SwinV2_v3)
@@ -76,7 +78,7 @@ fn test_tagging_benchmark() {
                 r.general.len(),
                 r.character.len()
             ),
-            Err(e) => println!("  WD14:         FAILED - {}", e),
+            Err(e) => failures.push(format!("WD14: {e}")),
         }
 
         // Camie
@@ -90,7 +92,7 @@ fn test_tagging_benchmark() {
                 r.general.len(),
                 r.character.len()
             ),
-            Err(e) => println!("  Camie:        FAILED - {}", e),
+            Err(e) => failures.push(format!("Camie: {e}")),
         }
 
         // PixAI (reference)
@@ -104,11 +106,16 @@ fn test_tagging_benchmark() {
                 r.general.len(),
                 r.character.len()
             ),
-            Err(e) => println!("  PixAI:        FAILED - {}", e),
+            Err(e) => failures.push(format!("PixAI: {e}")),
         }
     }
 
     println!("\n============================================================");
+    assert!(
+        failures.is_empty(),
+        "Model inference failures:\n{}",
+        failures.join("\n")
+    );
     println!("Benchmark complete");
     println!("============================================================");
 }
@@ -125,33 +132,25 @@ fn test_deepdanbooru_vs_python() {
         image_path
     );
 
-    // Python reference
-    let mut cmd = std::process::Command::new("uv");
-    cmd.current_dir("imgutils")
-        .arg("run")
-        .arg("python")
-        .arg("-c")
-        .arg(&format!(
-            "import json, sys; sys.path.insert(0, '.'); from imgutils.tagging.deepdanbooru import get_deepdanbooru_tags; \
-             rating, general, chars = get_deepdanbooru_tags('{}'); \
-             print(json.dumps({{'success': True, 'general': general, 'character': chars}}))",
-            image_path.display()
-        ));
-    let output = cmd.output().expect("Failed to execute python");
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        println!("Python output: {}", stdout);
-    }
+    let py_output = support::python(&format!(
+        "import json; from imgutils.tagging.deepdanbooru import get_deepdanbooru_tags; r,g,c=get_deepdanbooru_tags({}); print(json.dumps({{'general':g,'character':c}}))",
+        serde_json::to_string(&image_path.to_string_lossy()).unwrap()
+    ));
+    let reference: serde_json::Value =
+        serde_json::from_str(&py_output).expect("invalid Python reference");
 
     // Rust inference
     let image = image::open(&image_path).expect("Failed to open image");
     let result = dghs_imgutils_rs::tagging::deepdanbooru::get_deepdanbooru_tags_simple(&image);
-    match result {
-        Ok(r) => {
-            println!("Rust general: {} tags", r.general.len());
-            println!("Rust character: {} tags", r.character.len());
-            assert!(!r.general.is_empty(), "Expected at least some general tags");
-        }
-        Err(e) => eprintln!("Rust DeepDanbooru failed: {}", e),
-    }
+    let result = result.expect("Rust DeepDanbooru inference failed");
+    let expected = reference["general"]
+        .as_object()
+        .expect("Python general tags missing");
+    let actual: std::collections::HashSet<_> =
+        result.general.iter().map(|(k, _)| k.as_str()).collect();
+    let expected: std::collections::HashSet<_> = expected.keys().map(String::as_str).collect();
+    let union = actual.union(&expected).count();
+    assert!(union > 0, "both tag sets are empty");
+    let iou = actual.intersection(&expected).count() as f32 / union as f32;
+    assert!(iou >= 0.9, "DeepDanbooru tag IoU {iou} < 0.9");
 }

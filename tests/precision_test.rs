@@ -1,140 +1,118 @@
-//! 精度検証テスト: Python 実装との出力比較。
-//!
-//! このテストは `#[ignore]` 属性が付いているため、CI では自動実行されない。
-//! 手動でテストを実行する際には、先に `generate_baseline.py` を実行して基準データを生成する必要がある。
-//!
-//! 使用方法:
-//! ```bash
-//! cd tests/precision
-//! python generate_baseline.py
-//! cd ../..
-//! cargo test --test precision_test -- --ignored
-//! ```
+//! Compare Rust's filter to actual Python/OpenCV output, never to the input.
+//! Generate fixtures with tests/precision/generate_baseline.py, then set
+//! DGHS_PRECISION_BASELINE_DIR and run this test with --ignored.
+use dghs_imgutils_rs::restore::adversarial::{
+    AdversarialNoiseParams, remove_adversarial_noise_with_params,
+};
+use image::{DynamicImage, RgbImage};
+use std::path::PathBuf;
 
-use image::DynamicImage;
-use ndarray::Array3;
+fn psnr(actual: &RgbImage, expected: &RgbImage) -> f64 {
+    region_psnr(actual, expected, None)
+}
 
-/// PSNR (Peak Signal-to-Noise Ratio) を計算する。
-fn psnr(a: &Array3<f32>, b: &Array3<f32>) -> f32 {
-    assert_eq!(a.shape(), b.shape(), "Shape mismatch");
-
-    let mut mse = 0.0f32;
-    for (va, vb) in a.iter().zip(b.iter()) {
-        let diff = va - vb;
-        mse += diff * diff;
+/// Separates the four-pixel border affected by two radius-two filter passes.
+fn region_psnr(actual: &RgbImage, expected: &RgbImage, border: Option<bool>) -> f64 {
+    assert_eq!(
+        actual.dimensions(),
+        expected.dimensions(),
+        "reference shape mismatch"
+    );
+    assert!(!actual.is_empty(), "empty reference image");
+    let mut squared_error = 0.0;
+    let mut count = 0;
+    for (x, y, pixel) in actual.enumerate_pixels() {
+        let is_border = x < 4 || y < 4 || x + 4 >= actual.width() || y + 4 >= actual.height();
+        if border.is_some_and(|wanted| wanted != is_border) {
+            continue;
+        }
+        for (&a, &b) in pixel.0.iter().zip(expected.get_pixel(x, y).0.iter()) {
+            squared_error += (f64::from(a) - f64::from(b)).powi(2);
+            count += 1;
+        }
     }
-    mse /= a.len() as f32;
-
-    if mse < 1e-10 {
-        f32::INFINITY
+    assert!(count > 0, "empty comparison region");
+    let mse = squared_error / count as f64;
+    if mse == 0.0 {
+        f64::INFINITY
     } else {
-        10.0 * (255.0 * 255.0 / mse).log10()
+        10.0 * (255.0_f64.powi(2) / mse).log10()
     }
 }
-
-/// ndarray を DynamicImage に変換する (RGB, f32, 0-255)。
-fn array_to_dynamic_image(arr: &Array3<f32>) -> DynamicImage {
-    let (h, w) = (arr.shape()[1], arr.shape()[2]);
-    let mut img = image::RgbImage::new(w as u32, h as u32);
-    for y in 0..h {
-        for x in 0..w {
-            let r = arr[[0, y, x]].clamp(0.0, 255.0).round() as u8;
-            let g = arr[[1, y, x]].clamp(0.0, 255.0).round() as u8;
-            let b = arr[[2, y, x]].clamp(0.0, 255.0).round() as u8;
-            img.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
-        }
+fn params() -> AdversarialNoiseParams {
+    AdversarialNoiseParams {
+        b_iters: 2,
+        g_iters: 0,
+        diameter_min: 5,
+        diameter_max: 5,
+        sigma_color_min: 20.0,
+        sigma_color_max: 20.0,
+        sigma_space_min: 8.0,
+        sigma_space_max: 8.0,
+        ..Default::default()
     }
-    DynamicImage::ImageRgb8(img)
+}
+#[test]
+#[ignore = "requires generated Python/OpenCV input and expected PNG fixtures"]
+fn test_adversarial_noise_removal_precision() {
+    let dir = std::env::var_os("DGHS_PRECISION_BASELINE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/precision"));
+    let input = image::open(dir.join("baseline_input.png"))
+        .expect("missing input: run tests/precision/generate_baseline.py");
+    let expected = image::open(dir.join("baseline_adversarial.png"))
+        .expect("missing Python expected output: regenerate the baseline")
+        .to_rgb8();
+    assert_ne!(
+        input.to_rgb8(),
+        expected,
+        "reference must exercise filtering, not identity"
+    );
+    let actual = remove_adversarial_noise_with_params(&input, &params())
+        .expect("Rust filtering failed")
+        .to_rgb8();
+    let score = psnr(&actual, &expected);
+    println!("Rust versus Python/OpenCV PSNR: {score:.2} dB");
+    assert!(score > 35.0, "Python parity PSNR {score:.2} dB <= 35 dB");
+    for (name, border) in [("border", true), ("interior", false)] {
+        let score = region_psnr(&actual, &expected, Some(border));
+        println!("{name} PSNR: {score:.2} dB");
+        assert!(score > 35.0, "{name} PSNR {score:.2} dB <= 35 dB");
+    }
+    let identity_score = psnr(&input.to_rgb8(), &expected);
+    assert!(
+        score > identity_score + 3.0,
+        "filter must improve over unchanged input ({identity_score:.2} dB)"
+    );
+}
+#[test]
+fn test_bilateral_filter_basic() {
+    let input = DynamicImage::ImageRgb8(RgbImage::from_pixel(16, 16, image::Rgb([128; 3])));
+    let actual = remove_adversarial_noise_with_params(&input, &params())
+        .unwrap()
+        .to_rgb8();
+    assert_eq!(actual, input.to_rgb8());
+}
+#[test]
+fn psnr_rejects_a_wrong_reference() {
+    let a = RgbImage::from_pixel(16, 16, image::Rgb([0; 3]));
+    let b = RgbImage::from_pixel(16, 16, image::Rgb([255; 3]));
+    assert_eq!(psnr(&a, &b), 0.0);
 }
 
-/// DynamicImage を ndarray に変換する (RGB, f32, 0-255)。
-fn dynamic_image_to_array(img: &DynamicImage) -> Array3<f32> {
-    let rgb = img.to_rgb8();
-    let (w, h) = rgb.dimensions();
-    let mut arr = Array3::<f32>::zeros((3, h as usize, w as usize));
-    for (x, y, pixel) in rgb.enumerate_pixels() {
-        arr[[0, y as usize, x as usize]] = pixel[0] as f32;
-        arr[[1, y as usize, x as usize]] = pixel[1] as f32;
-        arr[[2, y as usize, x as usize]] = pixel[2] as f32;
-    }
-    arr
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// adversarial noise removal の精度テスト。
-    ///
-    /// Python 版と同一入力に対して、PSNR > 30dB を期待する。
-    #[test]
-    #[ignore] // 手動実行: python generate_baseline.py 後に cargo test -- --ignored
-    fn test_adversarial_noise_removal_precision() {
-        // 基準データの読み込み
-        let input_path = "tests/precision/baseline_input.npy";
-        if !std::path::Path::new(input_path).exists() {
-            eprintln!(
-                "Baseline data not found. Run: cd tests/precision && python generate_baseline.py"
-            );
-            return;
-        }
-
-        // npy ファイルからデータを読み込む（簡易実装）
-        // 注意: 本番環境では ndarray-npy クレートの使用を推奨
-        let input_data = std::fs::read(input_path).expect("Failed to read baseline_input.npy");
-        // npy ファイルのヘッダーをスキップしてデータを読み込む
-        // 実際の実装では適切な npy パーサーを使用すること
-
-        // テスト画像を生成（npy ファイルが読めない場合のフォールバック）
-        let mut arr = Array3::<f32>::zeros((3, 64, 64));
-        for y in 0..64 {
-            for x in 0..64 {
-                arr[[0, y, x]] = (x as f32 / 64.0) * 255.0;
-                arr[[1, y, x]] = (y as f32 / 64.0) * 255.0;
-                arr[[2, y, x]] = ((x + y) as f32 / 128.0) * 255.0;
-            }
-        }
-
-        let img = array_to_dynamic_image(&arr);
-
-        // Rust で adversarial noise removal を実行
-        let result = dghs_imgutils_rs::restore::adversarial::remove_adversarial_noise(
-            &img, 2, 1, // テスト用に少ないイテレーション数
-        )
-        .expect("Adversarial noise removal failed");
-
-        let result_arr = dynamic_image_to_array(&result);
-
-        // PSNR を計算（入力と出力の差分）
-        let psnr_value = psnr(&arr, &result_arr);
-        println!("PSNR (input vs output): {:.2} dB", psnr_value);
-
-        // PSNR > 20dB を期待（フィルタリングなので完全一致はしない）
-        assert!(
-            psnr_value > 20.0,
-            "PSNR too low: {:.2} dB (expected > 20 dB)",
-            psnr_value
-        );
-    }
-
-    /// bilateral filter の基本テスト。
-    #[test]
-    fn test_bilateral_filter_basic() {
-        // 定数画像に対してフィルタを適用しても変化しないことを確認
-        let arr = Array3::<f32>::from_elem((3, 16, 16), 128.0);
-        let img = array_to_dynamic_image(&arr);
-
-        let result = dghs_imgutils_rs::restore::adversarial::remove_adversarial_noise(&img, 1, 0)
-            .expect("Adversarial noise removal failed");
-
-        let result_arr = dynamic_image_to_array(&result);
-
-        // 定数画像なので PSNR は無限大になるはず
-        let psnr_value = psnr(&arr, &result_arr);
-        assert!(
-            psnr_value > 50.0,
-            "PSNR for constant image too low: {:.2} dB",
-            psnr_value
-        );
-    }
+#[test]
+fn nonconstant_filter_has_known_weighted_output() {
+    let input = DynamicImage::ImageRgb8(RgbImage::from_fn(2, 1, |x, _| {
+        image::Rgb([100 + x as u8 * 10; 3])
+    }));
+    let mut settings = params();
+    settings.b_iters = 1;
+    settings.diameter_min = 3;
+    settings.diameter_max = 3;
+    // Neighbor weight exp(-1/(2*8²) - 3*10²/(2*20²)); normalized means round to 104,106.
+    let actual = remove_adversarial_noise_with_params(&input, &settings)
+        .unwrap()
+        .to_rgb8();
+    assert_eq!(actual.get_pixel(0, 0).0, [104; 3]);
+    assert_eq!(actual.get_pixel(1, 0).0, [106; 3]);
 }

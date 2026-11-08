@@ -6,6 +6,7 @@ pub mod error;
 mod runtime;
 pub mod session;
 mod session_cache;
+pub(crate) mod shape;
 pub mod yolo;
 
 pub use backend::{

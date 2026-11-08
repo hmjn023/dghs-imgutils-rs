@@ -139,6 +139,7 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
         })
         .collect();
 
+    assert_detection_presence(rust_results.len(), py_output.detections.len());
     let sims = bboxes_similarity(&rust_bboxes, &py_bboxes);
     let matched_count = sims.iter().filter(|&&v| v > 0.3).count();
 
@@ -147,7 +148,7 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
         matched_count
     );
 
-    if !py_output.detections.is_empty() && !rust_results.is_empty() {
+    if !py_output.detections.is_empty() {
         // 最低でも 1 件以上のマッチングが成功すること（画像はそれぞれ何らかの検出対象を含むものを選定）
         assert!(
             matched_count > 0,
@@ -164,10 +165,13 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
             let mut best_py_idx = None;
             let mut best_iou = 0.3f32;
 
-            for p_idx in 0..py_output.detections.len() {
+            for (p_idx, py_bbox) in py_bboxes.iter().enumerate() {
+                if rust_results[r_idx].label != py_output.detections[p_idx].label {
+                    continue;
+                }
                 let iou = dghs_imgutils_rs::detect::similarity::calculate_iou(
                     &rust_bboxes[r_idx],
-                    &py_bboxes[p_idx],
+                    py_bbox,
                 );
                 if iou > best_iou {
                     best_iou = iou;
@@ -191,25 +195,24 @@ fn run_precision_test_for_task(task_type: &str, test_image_rel_path: &str) {
             }
         }
 
-        if valid_pairs > 0 {
-            let mae_coords = total_coords_diff / valid_pairs as f32;
-            let mae_score = total_score_diff / valid_pairs as f32;
+        assert!(valid_pairs > 0, "No matching boxes with the same label");
+        let mae_coords = total_coords_diff / valid_pairs as f32;
+        let mae_score = total_score_diff / valid_pairs as f32;
 
-            println!("  BBox 座標平均絶対誤差 (MAE): {:.4} px", mae_coords);
-            println!("  信頼度スコア平均絶対誤差 (MAE): {:.6}", mae_score);
+        println!("  BBox 座標平均絶対誤差 (MAE): {:.4} px", mae_coords);
+        println!("  信頼度スコア平均絶対誤差 (MAE): {:.6}", mae_score);
 
-            // しきい値境界テスト: YOLO/RT-DETR の等価移植として MAE <= 5.0px 未満、スコア MAE <= 0.15 未満であることを保証
-            assert!(
-                mae_coords <= 5.0,
-                "BBox 座標誤差 MAE がしきい値(5.0px)を超えています: {:.4} px",
-                mae_coords
-            );
-            assert!(
-                mae_score <= 0.15,
-                "信頼度スコア誤差 MAE がしきい値(0.15)を超えています: {:.6}",
-                mae_score
-            );
-        }
+        // しきい値境界テスト: YOLO/RT-DETR の等価移植として MAE <= 5.0px 未満、スコア MAE <= 0.15 未満であることを保証
+        assert!(
+            mae_coords <= 5.0,
+            "BBox 座標誤差 MAE がしきい値(5.0px)を超えています: {:.4} px",
+            mae_coords
+        );
+        assert!(
+            mae_score <= 0.15,
+            "信頼度スコア誤差 MAE がしきい値(0.15)を超えています: {:.6}",
+            mae_score
+        );
     }
 
     println!("🎉 タスク [{}] 検証パス！", task_type);
@@ -234,4 +237,21 @@ fn test_detect_precision_and_benchmark() {
     println!("\n============================================================");
     println!("🏆 全ての物体検出器で等価移植の精度アサーションに合格しました！");
     println!("============================================================");
+}
+
+/// Missing Rust detections must not bypass the numerical comparisons.
+fn assert_detection_presence(actual: usize, expected: usize) {
+    assert!(
+        actual > 0 || expected == 0,
+        "Rust returned no detections when Python detected objects"
+    );
+}
+#[test]
+#[should_panic(expected = "Rust returned no detections")]
+fn missing_rust_detections_fail() {
+    assert_detection_presence(0, 1);
+}
+#[test]
+fn empty_reference_allows_empty_detections() {
+    assert_detection_presence(0, 0);
 }

@@ -169,12 +169,8 @@ fn test_imgcensor_benchmark_and_precision() {
     let mut stamp_path = PathBuf::from(manifest_dir);
     stamp_path.push("imgutils/imgutils/operate/heart_censor.png");
 
-    if !image_path.exists() || !stamp_path.exists() {
-        eprintln!("Skipping benchmark: test files not found.");
-        eprintln!("  image: {:?}", image_path);
-        eprintln!("  stamp: {:?}", stamp_path);
-        return;
-    }
+    assert!(image_path.is_file(), "missing image fixture");
+    assert!(stamp_path.is_file(), "missing stamp fixture");
 
     println!("\n🧪 Operate Benchmark: Image-based censor");
     println!("==============================================");
@@ -183,15 +179,12 @@ fn test_imgcensor_benchmark_and_precision() {
     let img = image::open(&image_path).expect("Failed to open test image");
     let stamp = image::open(&stamp_path).expect("Failed to open stamp image");
 
-    let mut areas: Vec<BBox> = vec![];
-    // Simulate a few NSFW-like areas (face-sized boxes at various positions)
-    areas.push((100, 100, 220, 240));
-    areas.push((300, 150, 380, 250));
-    areas.push((500, 80, 600, 180));
+    // Match the Python reference's single box and contain fit.
+    let areas: Vec<BBox> = vec![(100, 100, 300, 300)];
 
     let rust_start = Instant::now();
     let mut rgba = img.to_rgba8();
-    censor_areas_image(&mut rgba, &areas, &stamp, CensorImageFit::Cover);
+    censor_areas_image(&mut rgba, &areas, &stamp, CensorImageFit::Contain);
     let rust_duration = rust_start.elapsed();
     println!("✓ Rust censor_areas_image: {:?}", rust_duration);
 
@@ -218,15 +211,12 @@ fn test_imgcensor_benchmark_and_precision() {
     let py_duration = py_start.elapsed();
 
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() {
-        let stderr_str = String::from_utf8_lossy(&output.stderr);
-        eprintln!(
-            "⚠ Python side failed (non-critical):\n{}\n{}",
-            stdout_str, stderr_str
-        );
-        eprintln!("Skipping precision comparison.");
-        return;
-    }
+    assert!(
+        output.status.success(),
+        "Python reference failed: {}\n{}",
+        stdout_str,
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let py_output: PythonOperateOutput =
         serde_json::from_str(&stdout_str).expect("Failed to parse Python JSON output");
@@ -245,10 +235,38 @@ fn test_imgcensor_benchmark_and_precision() {
         py_duration.as_secs_f64() / rust_duration.as_secs_f64()
     );
 
-    // --- Output size check ---
-    let rust_file_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
-    println!("  Rust output file size: {} bytes", rust_file_size);
-    assert!(rust_file_size > 1000, "Rust output file suspiciously small");
+    let expected = image::open(py_output.output_path.expect("Python omitted output path"))
+        .expect("Python output image missing")
+        .to_rgb8();
+    let actual = result_img.to_rgb8();
+    assert_eq!(actual.dimensions(), expected.dimensions());
+    // Pillow/image Lanczos differ at edges; compare pixels, not PNG file sizes.
+    let mae = actual
+        .as_raw()
+        .iter()
+        .zip(expected.as_raw())
+        .map(|(&a, &b)| (f64::from(a) - f64::from(b)).abs())
+        .sum::<f64>()
+        / actual.as_raw().len() as f64;
+    assert!(mae < 2.0, "Python pixel MAE: {mae}");
+    // The changed area must also meet the tolerance; the unchanged background
+    // must not dilute a missing or incorrect stamp.
+    assert!(
+        actual.width() >= 300 && actual.height() >= 300,
+        "fixture must contain the stamp box"
+    );
+    let mut box_error = 0.0;
+    for y in 100..300 {
+        for x in 100..300 {
+            for c in 0..3 {
+                box_error += (f64::from(actual.get_pixel(x, y)[c])
+                    - f64::from(expected.get_pixel(x, y)[c]))
+                .abs();
+            }
+        }
+    }
+    let box_mae = box_error / (200.0 * 200.0 * 3.0);
+    assert!(box_mae < 2.0, "Python stamp-area MAE: {box_mae}");
 
     println!("🎉 Operate benchmark passed!");
 }
