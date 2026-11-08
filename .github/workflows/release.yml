@@ -30,12 +30,9 @@ jobs:
           node-version: 20
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - if: matrix.target == 'linux-x64-gnu'
-        run: node --test tests/install-native.test.mjs
       - run: npm install --ignore-scripts
       - run: npm run build
-      - name: Check native binding loads
-        run: node -e "const addon = require('./index.js'); if (typeof addon.getVersion !== 'function') throw new Error('Missing getVersion export'); console.log(addon.getVersion())"
+      - run: npm run test:node
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.target }}

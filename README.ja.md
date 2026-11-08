@@ -298,8 +298,9 @@ mise install
 export HF_HOME="$PWD/.cache/huggingface"
 export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
-cargo test --lib --no-default-features
+cargo test
 npm install --ignore-scripts
+npm test  # デバッグ用アドオンをビルドし、モデルのダウンロードなしで Node.js API をテスト
 npm run build
 ```
 

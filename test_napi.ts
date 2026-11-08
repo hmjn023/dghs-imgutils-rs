@@ -54,6 +54,7 @@ async function main() {
     });
     console.log();
   } catch (err) {
+    process.exitCode = 1;
     console.error('✗ PixAI Tagger の実行中にエラーが発生しました:', err);
   }
 
@@ -90,6 +91,7 @@ async function main() {
     }
     console.log();
   } catch (err) {
+    process.exitCode = 1;
     console.error('✗ CCIP 評価の実行中にエラーが発生しました:', err);
   }
 
@@ -114,6 +116,7 @@ async function main() {
     console.log('  ✓ クラスタリング処理の動作を確認しました。');
     console.log();
   } catch (err) {
+    process.exitCode = 1;
     console.error('✗ CCIP クラスタリング中にエラーが発生しました:', err);
   }
 
@@ -142,6 +145,7 @@ async function main() {
     });
     console.log();
   } catch (err) {
+    process.exitCode = 1;
     console.error('✗ 物体検出の実行中にエラーが発生しました:', err);
   }
 
@@ -167,6 +171,7 @@ async function main() {
     }
     console.log();
   } catch (err) {
+    process.exitCode = 1;
     console.error('✗ 領域分割の実行中にエラーが発生しました:', err);
   }
 
