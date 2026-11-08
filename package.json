@@ -18,6 +18,9 @@
   "scripts": {
     "build": "node scripts/build-native.mjs --release",
     "build:debug": "node scripts/build-native.mjs",
+    "pretest": "npm run build:debug",
+    "test": "npm run test:node",
+    "test:node": "node --test tests/install-native.test.mjs tests/native-binding.test.cjs",
     "postinstall": "node scripts/install-native.mjs"
   },
   "engines": { "node": ">=18" },

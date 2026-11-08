@@ -302,8 +302,9 @@ mise install
 export HF_HOME="$PWD/.cache/huggingface"
 export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
-cargo test --lib --no-default-features
+cargo test
 npm install --ignore-scripts
+npm test  # build the debug addon and test the Node.js API without downloading models
 npm run build
 ```
 
@@ -333,12 +334,13 @@ download or bundle the provider runtime:
 | AMD Radeon GPU | `amd-gpu` | ROCm, MIGraphX, and MIGraphX-enabled ONNX Runtime |
 | AMD XDNA/Vitis-AI | `amd-npu` | Target-specific Vitis-AI/XDNA runtime; experimental |
 
-For a Node.js addon, the default `napi` feature is already enabled. A build
+Rust builds use the core library by default. The Node.js build script enables the
+`napi` feature explicitly. A build
 that contains every provider binding is possible, but the loaded runtime must
 actually contain the corresponding providers:
 
 ```bash
-cargo build --release --all-features
+cargo build --release --lib --all-features
 ```
 
 `--all-features` is a compile check, not proof that every provider is available

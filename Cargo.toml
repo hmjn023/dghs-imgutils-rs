@@ -47,14 +47,14 @@ tokenizers = { version = "0.22", default-features = false, features = ["fancy-re
 tempfile = "3"
 
 [build-dependencies]
-napi-build = "2.1.4"
+napi-build = { version = "2.1.4", optional = true }
 
 [features]
-default = ["napi"]
+default = []
 # Convenience aggregate; directml is Windows-only and the AMD providers
 # require their vendor SDK/runtime on the target system.
 all-providers = ["cuda", "tensorrt", "directml", "openvino", "amd-gpu", "amd-npu"]
-napi = ["dep:napi", "dep:napi-derive"]
+napi = ["dep:napi", "dep:napi-derive", "dep:napi-build"]
 cuda = ["ort/cuda"]
 tensorrt = ["ort/tensorrt"]
 directml = ["ort/directml"]

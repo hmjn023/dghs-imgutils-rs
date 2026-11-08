@@ -298,8 +298,9 @@ mise install
 export HF_HOME="$PWD/.cache/huggingface"
 export IU_HOME="$PWD/.cache/imgutils"
 cargo build --release
-cargo test --lib --no-default-features
+cargo test
 npm install --ignore-scripts
+npm test  # デバッグ用アドオンをビルドし、モデルのダウンロードなしで Node.js API をテスト
 npm run build
 ```
 
@@ -328,11 +329,12 @@ Cargo featureはproviderのRust bindingをビルドするもので、provider ru
 | AMD Radeon GPU | `amd-gpu` | ROCm、MIGraphX、MIGraphX対応ONNX Runtime |
 | AMD XDNA/Vitis-AI | `amd-npu` | 対象機種用Vitis-AI/XDNA runtime（experimental） |
 
-Node.js addonではdefaultの`napi` featureが有効です。全providerのbindingを含む
+通常のRustビルドではコアライブラリを使用し、Node.jsのビルドスクリプトが
+`napi` featureを明示的に有効にします。全providerのbindingを含む
 ビルドも可能ですが、ロードするRuntimeが実際にproviderを含んでいる必要があります。
 
 ```bash
-cargo build --release --all-features
+cargo build --release --lib --all-features
 ```
 
 `--all-features`はcompile確認であり、対象hostで全providerが利用可能である証拠では

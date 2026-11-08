@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // Exercise the installer against fake Release responses without network access.
-test('installs verified release assets and rejects corrupted downloads', async () => {
-  if (process.platform !== 'linux' || process.arch !== 'x64' || !process.report.getReport().header.glibcVersionRuntime) return;
+test('installs verified release assets and rejects corrupted downloads', {
+  skip: process.platform !== 'linux' || process.arch !== 'x64' || !process.report.getReport().header.glibcVersionRuntime
+    ? 'fixture targets Linux x64 glibc' : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), 'imgutils-install-'));
   try {
     await mkdir(join(root, 'scripts'));
