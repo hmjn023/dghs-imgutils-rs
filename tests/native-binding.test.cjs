@@ -24,3 +24,9 @@ test('a tensor shape mismatch reaches JavaScript as an error', () => {
     message: /Invalid tensor shape/,
   });
 });
+
+test('offloadInferenceSessions can be awaited repeatedly and preserves the provider settings', async () => {
+  const configuration = addon.getInferenceConfiguration();
+  await Promise.all([addon.offloadInferenceSessions(), addon.offloadInferenceSessions()]);
+  assert.deepEqual(addon.getInferenceConfiguration(), configuration);
+});

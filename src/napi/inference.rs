@@ -328,6 +328,18 @@ pub fn reset_inference_configuration() -> napi::Result<()> {
     reset_core_inference().map_err(to_napi_error)
 }
 
+/// Evicts the process-wide ONNX session cache, waiting for pending compilation.
+/// Active inference calls retain their session until they finish. Drain calls
+/// across workers before offloading at a model boundary.
+#[napi]
+pub async fn offload_inference_sessions() -> napi::Result<()> {
+    napi::bindgen_prelude::spawn_blocking(|| {
+        crate::inference::clear_session_cache().map_err(to_napi_error)
+    })
+    .await
+    .map_err(|error| napi::Error::from_reason(error.to_string()))?
+}
+
 /// Returns the effective backend/device configuration.
 #[napi]
 pub fn get_inference_configuration() -> napi::Result<NapiInferenceConfiguration> {
