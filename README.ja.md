@@ -586,6 +586,8 @@ optionsを渡します。
 GPUとNPUで異なるONNX Runtime/provider配布物が必要な場合は、GPU workerとNPU workerを
 別プロセスまたは別コンテナで起動し、UI/routerから適切なworkerへリクエストを送ります。
 
+工程の切り替え時には各workerの推論完了を待ち、`await offloadInferenceSessions()` でプロセス共通のONNXセッションを解放できます。次回の推論で必要なセッションを読み込みます。プロバイダー設定とダウンロード済みのモデルファイルは保持されます。
+
 `DGHS_BACKEND=amd-gpu`、`amd-npu`、`cpu`はstrict指定です。provider初期化、
 モデル非対応、compile失敗は`BackendUnavailable`、`ModelUnsupported`、
 `CompilationFailed`として返し、明示的なAMD workerがCPUへ黙ってfallbackする

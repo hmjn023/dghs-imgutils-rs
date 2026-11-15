@@ -613,6 +613,8 @@ For multiple
 backends in one Rust process, use `create_onnx_session_with_options` or
 `get_or_create_session_with_options` directly.
 
+Await all active inference calls across workers, then call `await offloadInferenceSessions()` to evict cached ONNX sessions between model stages. The next inference reloads its session on demand. Provider configuration and downloaded model files are preserved.
+
 Call-local selection cannot replace `ORT_DYLIB_PATH` after the process starts.
 If GPU and NPU require different ONNX Runtime/provider distributions, keep the
 GPU and NPU workers in separate processes or containers and let the UI/router
