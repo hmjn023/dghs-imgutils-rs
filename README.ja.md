@@ -120,13 +120,13 @@ console.log(`同一キャラクター: ${isSame}`);
 [SmolVLM2-256M-Video-Instruct の公式 ONNX 版](https://huggingface.co/HuggingFaceTB/SmolVLM2-256M-Video-Instruct/tree/main/onnx) に画像とプロンプトを渡して、英語の説明文や回答を生成できます。
 
 ```typescript
-import { smolvlm2Generate } from 'dghs-imgutils-rs';
+import { smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
 
 const text = smolvlm2Generate(
   './cat.png',
   'Describe this image in one sentence.',
   { maxNewTokens: 128 },
-  { provider: 'cpu' },
+  { provider: NapiInferenceProvider.Cpu },
 );
 console.log(text);
 ```

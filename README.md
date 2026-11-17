@@ -121,13 +121,13 @@ Generate English text from an image and a prompt with the official
 [SmolVLM2-256M-Video-Instruct ONNX export](https://huggingface.co/HuggingFaceTB/SmolVLM2-256M-Video-Instruct/tree/main/onnx).
 
 ```typescript
-import { smolvlm2Generate } from 'dghs-imgutils-rs';
+import { smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
 
 const text = smolvlm2Generate(
   './cat.png',
   'Describe this image in one sentence.',
   { maxNewTokens: 128 },
-  { provider: 'cpu' },
+  { provider: NapiInferenceProvider.Cpu },
 );
 console.log(text);
 ```
