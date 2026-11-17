@@ -25,7 +25,7 @@
 | **upscale** | 超解像（CDCアップスケーリング） |
 | **ascii** | アスキーアート生成 |
 | **resource** | 背景画像データセット管理 |
-| **generic** | CLIP、SigLIP、EmbeddingGemma 2 の埋め込み、SmolVLM2 の画像説明 |
+| **generic** | CLIP、SigLIP、EmbeddingGemma 2 の埋め込み、SmolVLM2 の画像説明、PLaMo 3 の翻訳 |
 
 ## インストール
 
@@ -168,6 +168,72 @@ DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
 # npm run build:debug の後に実行
 DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
   npm run test:node
+```
+
+### PLaMo 3 による英日翻訳
+
+`plamo3Translate` に英語の文章を渡すと、日本語の訳文を取得できます。
+PLaMo 3 Translate 0.8B の [TeamFlaxia Q4 ONNX 版](https://huggingface.co/TeamFlaxia/plamo-3-translate-0.8b-onnx) を使用し、
+重みは 4bit、演算は FP32 です。
+
+```typescript
+import { plamo3Translate, smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
+
+const japanese = plamo3Translate(
+  'The image depicts a cardboard box with a cat inside it.',
+  { maxNewTokens: 512 },
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(japanese);
+
+// SmolVLM2 が生成した画像説明文を翻訳
+const english = smolvlm2Generate(
+  './cat.png',
+  'Describe this image in one sentence.',
+  undefined,
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(plamo3Translate(english, undefined, { provider: NapiInferenceProvider.Cpu }));
+```
+
+Rust API は `generic::plamo3::{plamo3_translate, Plamo3Options, Plamo3Error}` です。
+
+```rust,no_run
+use dghs_imgutils_rs::generic::plamo3::{plamo3_translate, Plamo3Options};
+
+let japanese = plamo3_translate(
+    "The image depicts a cardboard box with a cat inside it.",
+    &Plamo3Options::default(),
+)?;
+println!("{japanese}");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+初回に `tokenizer.json` と `onnx/model_q4.onnx`（重み約 1.05 GB）を
+Hugging Face キャッシュに取得します。両ファイルを配置したルートを
+`modelDir`（Rust では `model_dir`）に指定するとオフラインで利用できます。
+既存の推論設定とセッションキャッシュを利用し、PFML3 プロンプトと
+KV キャッシュは翻訳ごとに独立します。入力言語は英語、出力言語は日本語です。
+
+greedy decoding で EOS まで生成します。`maxNewTokens` は既定で 512、
+EOS を含みます。上限までに EOS に達しなければ Rust では
+`Plamo3Error::GenerationLimit` を返し、Node.js では例外を投げます。
+その場合は上限を増やすか、原文を分割してください。プロンプトと生成予算の
+合計は、学習時の最大長である 32768 トークン以内です。
+空白だけの入力と、予約制御トークン `<|plamo:...` を含む入力は拒否します。
+Node.js API は同期関数のため、対話アプリでは worker で実行してください。
+
+重みには [PLaMo Community License](https://huggingface.co/pfnet/plamo-3-translate-0.8b#license) が適用され、商用利用には条件があります。
+
+```bash
+cargo run --example plamo3_translate -- /path/to/export "Hello, world."
+# "-" でモデルを自動取得
+cargo run --example plamo3_translate -- - "Hello, world."
+# 実モデルテスト
+DGHS_PLAMO3_MODEL_DIR=/path/to/export \
+  cargo test --no-default-features --test plamo3_translation -- --ignored --nocapture
+# npm run build:debug の後に実行
+DGHS_PLAMO3_MODEL_DIR=/path/to/export npm run test:node
 ```
 
 ### EmbeddingGemma 2 による画像・テキスト検索
