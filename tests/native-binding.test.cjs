@@ -30,3 +30,30 @@ test('offloadInferenceSessions can be awaited repeatedly and preserves the provi
   await Promise.all([addon.offloadInferenceSessions(), addon.offloadInferenceSessions()]);
   assert.deepEqual(addon.getInferenceConfiguration(), configuration);
 });
+
+test('SmolVLM2 exposes input errors through the native boundary', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'imgutils-smolvlm2-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'image.png');
+  addon.rgbDecode([1, 0, 0], 3, 1, 1, 'CHW', path);
+  assert.throws(() => addon.smolvlm2Generate(path, ' '), { code: 'InvalidArg', message: /prompt/ });
+  assert.throws(() => addon.smolvlm2Generate(path, 'Describe', { maxNewTokens: 0 }), {
+    code: 'InvalidArg', message: /max_new_tokens/,
+  });
+});
+
+test('SmolVLM2 generates English from a cat image and follows the prompt', {
+  skip: !process.env.DGHS_SMOLVLM2_TEST_IMAGE,
+}, () => {
+  const options = { modelDir: process.env.DGHS_SMOLVLM2_MODEL_DIR, maxNewTokens: 80 };
+  const inference = { provider: 'cpu' };
+  const image = process.env.DGHS_SMOLVLM2_TEST_IMAGE;
+  const caption = addon.smolvlm2Generate(image, 'Describe this image in one sentence.', options, inference);
+  console.log(caption);
+  assert.match(caption.toLowerCase(), /cat/);
+  assert.match(caption.toLowerCase(), /box/);
+  const animal = addon.smolvlm2Generate(image, 'What animal is in the image? Answer with one word.', options, inference);
+  console.log(animal);
+  assert.match(animal.toLowerCase(), /cat/);
+  assert.equal(addon.smolvlm2Generate(image, 'Describe this image in one sentence.', options, inference), caption);
+});

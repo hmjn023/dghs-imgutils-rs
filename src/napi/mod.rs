@@ -605,6 +605,7 @@ pub mod pose;
 pub mod resource_ascii;
 pub mod restore_upscale;
 pub mod segment;
+pub mod smolvlm2;
 pub mod tagging;
 pub mod utils;
 pub mod validate;
