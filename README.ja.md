@@ -25,7 +25,7 @@
 | **upscale** | 超解像（CDCアップスケーリング） |
 | **ascii** | アスキーアート生成 |
 | **resource** | 背景画像データセット管理 |
-| **generic** | CLIP、SigLIP、EmbeddingGemma 2 の画像・テキスト埋め込み |
+| **generic** | CLIP、SigLIP、EmbeddingGemma 2 の埋め込み、SmolVLM2 の画像説明 |
 
 ## インストール
 
@@ -113,6 +113,61 @@ const emb1 = ccipGetEmbedding('./character_a.jpg');
 const emb2 = ccipGetEmbedding('./character_b.jpg');
 const isSame = ccipSame(emb1, emb2);
 console.log(`同一キャラクター: ${isSame}`);
+```
+
+### SmolVLM2 による画像説明文の生成
+
+[SmolVLM2-256M-Video-Instruct の公式 ONNX 版](https://huggingface.co/HuggingFaceTB/SmolVLM2-256M-Video-Instruct/tree/main/onnx) に画像とプロンプトを渡して、英語の説明文や回答を生成できます。
+
+```typescript
+import { smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
+
+const text = smolvlm2Generate(
+  './cat.png',
+  'Describe this image in one sentence.',
+  { maxNewTokens: 128 },
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(text);
+```
+
+Rust API は `generic::smolvlm2::{smolvlm2_generate, SmolVlm2Options}` です。
+
+```rust,no_run
+use dghs_imgutils_rs::generic::smolvlm2::{smolvlm2_generate, SmolVlm2Options};
+
+let image = image::open("./cat.png")?;
+let text = smolvlm2_generate(
+    &image,
+    "Describe this image in one sentence.",
+    &SmolVlm2Options::default(),
+)?;
+println!("{text}");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+既定では `tokenizer.json`、`onnx/vision_encoder.onnx`、
+`onnx/embed_tokens_int8.onnx`、`onnx/decoder_model_merged_int8.onnx` を
+Hugging Face キャッシュへ自動取得します。重みは合計約 540 MB です。
+これらを配置したルートを `modelDir`（Rust では `model_dir`）に指定すると
+オフラインで実行できます。画像エンコーダーは FP32、テキスト側は INT8 を使用します。
+画像は透過部分を白で合成し、分割せず 512×512 にリサイズします。
+セッションは既存の推論設定とキャッシュを利用します。
+
+各呼び出しは独立した会話として処理します。greedy decoding で EOS または
+`maxNewTokens`（既定 128、EOS を含む）まで生成します。トークン上限に達すると
+文の途中で終了する場合があります。プロンプトと生成予算の合計は 8192 トークン以内です。
+英語中心のモデルで、日本語出力は不安定です。Node.js API は同期関数のため、
+対話アプリでは worker で実行してください。
+
+```bash
+cargo run --example smolvlm2_caption -- ./cat.png "Describe this image in one sentence."
+# ローカルモデルと「箱に入った猫」の画像を使った統合テスト
+DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
+  cargo test --no-default-features --test smolvlm2_generation -- --ignored --nocapture
+# npm run build:debug の後に実行
+DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
+  npm run test:node
 ```
 
 ### EmbeddingGemma 2 による画像・テキスト検索

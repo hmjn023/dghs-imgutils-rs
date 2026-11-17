@@ -25,7 +25,7 @@ A high-performance Rust implementation of [dghs-imgutils](https://github.com/dee
 | **upscale** | Super-resolution (CDC upscaling) |
 | **ascii** | ASCII art generation |
 | **resource** | Background image dataset management |
-| **generic** | CLIP, SigLIP, and EmbeddingGemma 2 image/text embeddings |
+| **generic** | CLIP, SigLIP, EmbeddingGemma 2 embeddings, and SmolVLM2 image descriptions |
 
 ## Installation
 
@@ -113,6 +113,62 @@ const emb1 = await ccipGetEmbedding('./character_a.jpg');
 const emb2 = await ccipGetEmbedding('./character_b.jpg');
 const isSame = ccipSame(emb1, emb2);
 console.log(`Same character: ${isSame}`);
+```
+
+### Image descriptions with SmolVLM2
+
+Generate English text from an image and a prompt with the official
+[SmolVLM2-256M-Video-Instruct ONNX export](https://huggingface.co/HuggingFaceTB/SmolVLM2-256M-Video-Instruct/tree/main/onnx).
+
+```typescript
+import { smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
+
+const text = smolvlm2Generate(
+  './cat.png',
+  'Describe this image in one sentence.',
+  { maxNewTokens: 128 },
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(text);
+```
+
+Rust exposes `generic::smolvlm2::{smolvlm2_generate, SmolVlm2Options}`.
+
+```rust,no_run
+use dghs_imgutils_rs::generic::smolvlm2::{smolvlm2_generate, SmolVlm2Options};
+
+let image = image::open("./cat.png")?;
+let text = smolvlm2_generate(
+    &image,
+    "Describe this image in one sentence.",
+    &SmolVlm2Options::default(),
+)?;
+println!("{text}");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The default downloads `tokenizer.json`, `onnx/vision_encoder.onnx`,
+`onnx/embed_tokens_int8.onnx`, and `onnx/decoder_model_merged_int8.onnx`
+into the Hugging Face cache. Weights total about 540 MB. Set `modelDir`
+(`model_dir` in Rust) to an export root with those files for offline use.
+The vision encoder uses FP32 and the text graphs use INT8. Each image is
+resized to 512×512 with a white background for transparency, without image
+splitting. Sessions use the existing inference settings and cache.
+
+Each call starts a fresh conversation. Greedy decoding stops at EOS or
+`maxNewTokens` (128 by default, including EOS). The latter can produce a
+partial sentence. Prompt plus generation budget must fit 8192 tokens.
+The model is English-focused and Japanese output is unreliable.
+The Node.js function is synchronous, so run it in a worker for interactive apps.
+
+```bash
+cargo run --example smolvlm2_caption -- ./cat.png "Describe this image in one sentence."
+# Optional cat-in-a-box integration tests with local model assets
+DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
+  cargo test --no-default-features --test smolvlm2_generation -- --ignored --nocapture
+# After npm run build:debug
+DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
+  npm run test:node
 ```
 
 ### EmbeddingGemma 2 image/text search

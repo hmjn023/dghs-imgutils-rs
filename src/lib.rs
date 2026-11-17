@@ -54,7 +54,7 @@ pub mod utils;
 /// アスキーアート生成機能。
 pub mod ascii;
 
-/// 汎用 ML エンジン（CLIP, SigLIP, YOLO-Seg, TIMM 分類、画像拡張）。
+/// 汎用 ML エンジン（CLIP, SigLIP, SmolVLM2 画像説明、YOLO-Seg, TIMM 分類、画像拡張）。
 pub mod generic;
 
 /// 画像復元（NafNet / SCUNet / Adversarial ノイズ除去）。
