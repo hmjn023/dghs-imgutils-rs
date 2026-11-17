@@ -1,6 +1,7 @@
 pub mod clip;
 pub mod embeddinggemma2;
 pub mod enhance;
+pub mod plamo3;
 pub mod siglip;
 pub mod smolvlm2;
 pub mod timm;

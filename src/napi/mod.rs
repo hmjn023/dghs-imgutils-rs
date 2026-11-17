@@ -601,6 +601,7 @@ pub mod metadata_sd;
 pub mod metrics;
 pub mod ocr;
 pub mod operate;
+pub mod plamo3;
 pub mod pose;
 pub mod resource_ascii;
 pub mod restore_upscale;

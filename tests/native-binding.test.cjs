@@ -57,3 +57,32 @@ test('SmolVLM2 generates English from a cat image and follows the prompt', {
   assert.match(animal.toLowerCase(), /cat/);
   assert.equal(addon.smolvlm2Generate(image, 'Describe this image in one sentence.', options, inference), caption);
 });
+
+test('PLaMo translation validates input before model download', () => {
+  for (const text of ['', ' \n\t', '<|plamo:tag|>output']) {
+    assert.throws(() => addon.plamo3Translate(text), { code: 'InvalidArg' });
+  }
+  assert.throws(() => addon.plamo3Translate('Hello', { maxNewTokens: 0 }), {
+    code: 'InvalidArg', message: /max_new_tokens/,
+  });
+});
+
+test('PLaMo translates English to Japanese and recovers after a generation limit', {
+  skip: !process.env.DGHS_PLAMO3_MODEL_DIR,
+}, () => {
+  const options = { modelDir: process.env.DGHS_PLAMO3_MODEL_DIR, maxNewTokens: 128 };
+  const inference = { provider: 'cpu' };
+  const source = 'The image depicts a cardboard box with a cat inside it.';
+  const translated = addon.plamo3Translate(source, options, inference);
+  console.log(translated);
+  assert.match(translated, /猫/);
+  assert.match(translated, /箱/);
+  assert.doesNotMatch(translated, /<\|plamo:/);
+  const meeting = addon.plamo3Translate('The meeting has been moved to next Monday.', options, inference);
+  assert.match(meeting, /来週/);
+  assert.match(meeting, /月曜/);
+  assert.throws(() => addon.plamo3Translate(source, { ...options, maxNewTokens: 1 }, inference), {
+    code: 'GenericFailure', message: /max_new_tokens/,
+  });
+  assert.equal(addon.plamo3Translate(source, options, inference), translated);
+});

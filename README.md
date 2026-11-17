@@ -25,7 +25,7 @@ A high-performance Rust implementation of [dghs-imgutils](https://github.com/dee
 | **upscale** | Super-resolution (CDC upscaling) |
 | **ascii** | ASCII art generation |
 | **resource** | Background image dataset management |
-| **generic** | CLIP, SigLIP, EmbeddingGemma 2 embeddings, and SmolVLM2 image descriptions |
+| **generic** | CLIP, SigLIP, EmbeddingGemma 2 embeddings, SmolVLM2 image descriptions, and PLaMo 3 translation |
 
 ## Installation
 
@@ -121,13 +121,13 @@ Generate English text from an image and a prompt with the official
 [SmolVLM2-256M-Video-Instruct ONNX export](https://huggingface.co/HuggingFaceTB/SmolVLM2-256M-Video-Instruct/tree/main/onnx).
 
 ```typescript
-import { smolvlm2Generate } from 'dghs-imgutils-rs';
+import { smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
 
 const text = smolvlm2Generate(
   './cat.png',
   'Describe this image in one sentence.',
   { maxNewTokens: 128 },
-  { provider: 'cpu' },
+  { provider: NapiInferenceProvider.Cpu },
 );
 console.log(text);
 ```
@@ -169,6 +169,74 @@ DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
 # After npm run build:debug
 DGHS_SMOLVLM2_MODEL_DIR=/path/to/export DGHS_SMOLVLM2_TEST_IMAGE=./cat.png \
   npm run test:node
+```
+
+### English-to-Japanese translation with PLaMo 3
+
+`plamo3Translate` translates English text to Japanese with PLaMo 3 Translate
+0.8B using the [TeamFlaxia Q4 ONNX conversion](https://huggingface.co/TeamFlaxia/plamo-3-translate-0.8b-onnx).
+It uses 4-bit weights and FP32 activations.
+
+```typescript
+import { plamo3Translate, smolvlm2Generate, NapiInferenceProvider } from 'dghs-imgutils-rs';
+
+const japanese = plamo3Translate(
+  'The image depicts a cardboard box with a cat inside it.',
+  { maxNewTokens: 512 },
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(japanese);
+
+// Translate a generated image description.
+const english = smolvlm2Generate(
+  './cat.png',
+  'Describe this image in one sentence.',
+  undefined,
+  { provider: NapiInferenceProvider.Cpu },
+);
+console.log(plamo3Translate(english, undefined, { provider: NapiInferenceProvider.Cpu }));
+```
+
+Rust exposes `generic::plamo3::{plamo3_translate, Plamo3Options, Plamo3Error}`.
+
+```rust,no_run
+use dghs_imgutils_rs::generic::plamo3::{plamo3_translate, Plamo3Options};
+
+let japanese = plamo3_translate(
+    "The image depicts a cardboard box with a cat inside it.",
+    &Plamo3Options::default(),
+)?;
+println!("{japanese}");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The first call downloads `tokenizer.json` and `onnx/model_q4.onnx` (about
+1.05 GB of weights) into the Hugging Face cache. Set `modelDir` (`model_dir`
+in Rust) to a local root containing both files for offline use. Sessions use
+the existing inference configuration and cache; each translation has its own
+PFML3 prompt and KV cache. The function accepts English source text and fixes
+the target language to Japanese.
+
+Greedy decoding stops at EOS. `maxNewTokens` defaults to 512, including EOS.
+If EOS is not reached within this budget, Rust returns
+`Plamo3Error::GenerationLimit` and Node.js throws an error. Retry with a larger
+budget or split the source text. The source prompt and output budget must fit
+the model's 32768-token trained context. Empty text and reserved
+`<|plamo:...` control tokens are rejected. Node.js calls are synchronous;
+use a worker for interactive apps.
+
+The weights use the [PLaMo Community License](https://huggingface.co/pfnet/plamo-3-translate-0.8b#license),
+with conditions for commercial use.
+
+```bash
+cargo run --example plamo3_translate -- /path/to/export "Hello, world."
+# Use "-" to download the model automatically.
+cargo run --example plamo3_translate -- - "Hello, world."
+# Real-model tests
+DGHS_PLAMO3_MODEL_DIR=/path/to/export \
+  cargo test --no-default-features --test plamo3_translation -- --ignored --nocapture
+# After npm run build:debug
+DGHS_PLAMO3_MODEL_DIR=/path/to/export npm run test:node
 ```
 
 ### EmbeddingGemma 2 image/text search
